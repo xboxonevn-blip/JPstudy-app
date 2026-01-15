@@ -7,12 +7,24 @@ from typing import Callable, Optional, List
 from dataclasses import dataclass, field
 
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QPushButton, QFileDialog, QHBoxLayout,
-    QTableWidget, QTableWidgetItem, QMessageBox, QLineEdit, QComboBox, QTextEdit, QDialog, QDialogButtonBox
+    QWidget,
+    QVBoxLayout,
+    QLabel,
+    QPushButton,
+    QFileDialog,
+    QHBoxLayout,
+    QTableWidget,
+    QTableWidgetItem,
+    QMessageBox,
+    QLineEdit,
+    QComboBox,
+    QTextEdit,
+    QDialog,
+    QDialogButtonBox,
 )
 from PySide6.QtCore import Qt
 
-from app.db.repo import create_item_with_card, count_items, get_items_by_ids
+from app.db.repo import create_item_with_card, count_items, get_items_by_ids, build_cloze_preview
 
 
 @dataclass
@@ -23,12 +35,13 @@ class ImportResult:
     new_ids: List[int] = field(default_factory=list)
     error_rows: List[str] = field(default_factory=list)
     duplicate_rows: List[str] = field(default_factory=list)
+    warning_rows: List[str] = field(default_factory=list)  # e.g., cloze fallback
 
 
 class AddItemDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Them muc moi (A - Nap)")
+        self.setWindowTitle("Thêm mục mới (A - Nạp)")
         self.resize(520, 420)
 
         layout = QVBoxLayout(self)
@@ -37,8 +50,8 @@ class AddItemDialog(QDialog):
         self.cb_type = QComboBox()
         self.cb_type.addItems(["vocab", "kanji", "grammar"])
         self.ed_term = QLineEdit()
-        self.ed_term.setPlaceholderText("term (tu / kanji / mau)")
-        row1.addWidget(QLabel("Loai:"))
+        self.ed_term.setPlaceholderText("term (từ/kanji/mẫu)")
+        row1.addWidget(QLabel("Loại:"))
         row1.addWidget(self.cb_type, 1)
         row1.addWidget(QLabel("Term:"))
         row1.addWidget(self.ed_term, 2)
@@ -46,7 +59,7 @@ class AddItemDialog(QDialog):
 
         row2 = QHBoxLayout()
         self.ed_reading = QLineEdit()
-        self.ed_reading.setPlaceholderText("reading (kana) co the de trong")
+        self.ed_reading.setPlaceholderText("reading (kana) có thể để trống")
         self.ed_tags = QLineEdit()
         self.ed_tags.setPlaceholderText("tags: N4, food, ...")
         row2.addWidget(QLabel("Reading:"))
@@ -56,12 +69,12 @@ class AddItemDialog(QDialog):
         layout.addLayout(row2)
 
         self.ed_meaning = QLineEdit()
-        self.ed_meaning.setPlaceholderText("meaning (nghia Tieng Viet)")
+        self.ed_meaning.setPlaceholderText("meaning (nghĩa Tiếng Việt)")
         layout.addWidget(QLabel("Meaning:"))
         layout.addWidget(self.ed_meaning)
 
         self.ed_example = QTextEdit()
-        self.ed_example.setPlaceholderText("example sentence (cau vi du) nen co de luyen C sau nay")
+        self.ed_example.setPlaceholderText("example sentence (câu ví dụ) nên có để luyện C sau này")
         layout.addWidget(QLabel("Example:"))
         layout.addWidget(self.ed_example, 1)
 
@@ -103,7 +116,7 @@ class QuickQuizDialog(QDialog):
         layout.addWidget(self.lbl_front)
 
         self.ed_guess = QLineEdit()
-        self.ed_guess.setPlaceholderText("Nhap thu nghia (optional)")
+        self.ed_guess.setPlaceholderText("Nhập thử nghĩa (optional)")
         layout.addWidget(self.ed_guess)
 
         self.lbl_back = QTextEdit()
@@ -111,10 +124,10 @@ class QuickQuizDialog(QDialog):
         layout.addWidget(self.lbl_back, 1)
 
         btn_row = QHBoxLayout()
-        self.btn_reveal = QPushButton("Show answer")
-        self.btn_correct = QPushButton("I got it")
-        self.btn_wrong = QPushButton("I missed")
-        self.btn_close = QPushButton("Close")
+        self.btn_reveal = QPushButton("Xem đáp án")
+        self.btn_correct = QPushButton("Đúng")
+        self.btn_wrong = QPushButton("Sai")
+        self.btn_close = QPushButton("Đóng")
         for b in [self.btn_reveal, self.btn_correct, self.btn_wrong, self.btn_close]:
             b.setCursor(Qt.PointingHandCursor)
         self.btn_correct.setEnabled(False)
@@ -158,8 +171,8 @@ class QuickQuizDialog(QDialog):
             return
         item = self.items[self.index]
         text = (
-            f"Nghia: {item['meaning']}\n\n"
-            f"Vi du: {item['example']}\n\n"
+            f"Nghĩa: {item['meaning']}\n\n"
+            f"Ví dụ: {item['example']}\n\n"
             f"Tags: {item['tags']}"
         )
         self.lbl_back.setPlainText(text)
@@ -186,7 +199,7 @@ class ImportView(QWidget):
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
 
-        title = QLabel("A - Nap (Import CSV / Add the)")
+        title = QLabel("A - Nạp (Import CSV / Thêm thẻ)")
         title.setStyleSheet("font-size: 16px; font-weight: 700;")
         layout.addWidget(title)
 
@@ -199,8 +212,8 @@ class ImportView(QWidget):
         self.btn_auto_import = QPushButton("Auto Import")
         self.cb_level = QComboBox()
         self.cb_level.addItems(["N5", "N4", "N3", "N2", "N1", "All"])
-        self.btn_add = QPushButton("Them the")
-        self.btn_back = QPushButton("Ve Home")
+        self.btn_add = QPushButton("Thêm thẻ")
+        self.btn_back = QPushButton("Về Home")
 
         for b in [self.btn_import, self.btn_auto_import, self.btn_add, self.btn_back]:
             b.setCursor(Qt.PointingHandCursor)
@@ -229,7 +242,7 @@ class ImportView(QWidget):
 
     def refresh(self) -> None:
         total = count_items(self.db)
-        self.info.setText(f"Tong muc hien co: {total}. Import xong, the SRS se duoc tao va den han ngay hom nay.")
+        self.info.setText(f"Tổng mục hiện có: {total}. Import xong, thẻ SRS sẽ đến hạn ngay hôm nay.")
         cur = self.db.execute(
             """SELECT item_type, term, reading, meaning, example, tags
                  FROM items ORDER BY id DESC LIMIT 100"""
@@ -247,7 +260,7 @@ class ImportView(QWidget):
         if dlg.exec() == QDialog.Accepted:
             data = dlg.data()
             if not data["term"] or not data["meaning"]:
-                QMessageBox.warning(self, "Thieu thong tin", "Can nhap toi thieu: term + meaning.")
+                QMessageBox.warning(self, "Thiếu thông tin", "Cần nhập tối thiểu: term + meaning.")
                 return
             _, created = create_item_with_card(
                 self.db,
@@ -260,12 +273,12 @@ class ImportView(QWidget):
             )
             self.refresh()
             if created:
-                QMessageBox.information(self, "OK", "Da them muc va tao the SRS (den han hom nay).")
+                QMessageBox.information(self, "OK", "Đã thêm mục và tạo thẻ SRS (đến hạn hôm nay).")
             else:
                 QMessageBox.information(
                     self,
-                    "Da ton tai",
-                    "Term + reading da ton tai, da merge tags/example va giu the cu (den han hom nay).",
+                    "Đã tồn tại",
+                    "Term + reading đã tồn tại, đã merge tags/example và giữ thẻ cũ (đến hạn hôm nay).",
                 )
 
     def _merge_tags(self, tags: str, level_tag: Optional[str]) -> str:
@@ -342,6 +355,7 @@ class ImportView(QWidget):
         skipped = 0
         error_rows: List[str] = []
         duplicate_rows: List[str] = []
+        warning_rows: List[str] = []
         new_ids: List[int] = []
 
         with open(path, "r", encoding="utf-8-sig", newline="") as f:
@@ -355,6 +369,10 @@ class ImportView(QWidget):
             for row_num, row in enumerate(reader, start=2):
                 try:
                     data = self._map_row(row, level_tag=level_tag)
+                    if data["example"]:
+                        _, _, used_fallback, reason = build_cloze_preview(data["example"], data["term"])
+                        if used_fallback:
+                            warning_rows.append(f"Row {row_num}: cloze fallback ({reason}) - term không có trong câu?")
                     new_id, created = create_item_with_card(
                         self.db,
                         item_type=data["item_type"],
@@ -369,7 +387,7 @@ class ImportView(QWidget):
                         imported += 1
                     else:
                         skipped += 1
-                        duplicate_rows.append(f"Row {row_num}: trung term+reading (id={new_id})")
+                        duplicate_rows.append(f"Row {row_num}: trùng term+reading (id={new_id})")
                 except Exception as e:
                     errors += 1
                     msg = str(e).strip() or e.__class__.__name__
@@ -382,6 +400,7 @@ class ImportView(QWidget):
             new_ids=new_ids,
             error_rows=error_rows,
             duplicate_rows=duplicate_rows,
+            warning_rows=warning_rows,
         )
 
     def on_auto_import(self):
@@ -397,6 +416,7 @@ class ImportView(QWidget):
         total_skipped = 0
         error_rows_all: List[str] = []
         duplicate_rows_all: List[str] = []
+        warning_rows_all: List[str] = []
         new_ids: List[int] = []
 
         for lvl in levels:
@@ -414,6 +434,7 @@ class ImportView(QWidget):
             total_skipped += result.skipped
             error_rows_all.extend([f"{lvl} - {msg}" for msg in result.error_rows])
             duplicate_rows_all.extend([f"{lvl} - {msg}" for msg in result.duplicate_rows])
+            warning_rows_all.extend([f"{lvl} - {msg}" for msg in result.warning_rows])
             new_ids.extend(result.new_ids)
 
         if total_imported == 0 and total_errors == 0 and missing:
@@ -442,12 +463,17 @@ class ImportView(QWidget):
             if total_skipped > len(duplicate_rows_all):
                 preview_dup += "\n..."
             msg += "\nDuplicates (preview):\n" + preview_dup
+        if warning_rows_all:
+            preview_warn = "\n".join(warning_rows_all[:8])
+            if len(warning_rows_all) > 8:
+                preview_warn += "\n..."
+            msg += "\nCloze warnings:\n" + preview_warn
         QMessageBox.information(self, "Auto import done", msg)
         self._launch_quiz_with_ids(new_ids)
 
     def on_import_csv(self):
         path, _ = QFileDialog.getOpenFileName(
-            self, "Chon file CSV", "", "CSV Files (*.csv);;All Files (*)"
+            self, "Chọn file CSV", "", "CSV Files (*.csv);;All Files (*)"
         )
         if not path:
             return
@@ -455,14 +481,14 @@ class ImportView(QWidget):
         try:
             result = self._import_csv(path)
         except Exception as e:
-            QMessageBox.critical(self, "Import loi", str(e))
+            QMessageBox.critical(self, "Import lỗi", str(e))
             return
 
         self.refresh()
         msg = (
-            f"Da import: {result.imported} dong. "
-            f"Trung (merge/skip): {result.skipped} dong. "
-            f"Loi: {result.errors} dong."
+            f"Đã import: {result.imported} dòng. "
+            f"Trùng (merge/skip): {result.skipped} dòng. "
+            f"Lỗi: {result.errors} dòng."
         )
         if result.errors and result.error_rows:
             preview = "\n".join(result.error_rows[:8])
@@ -474,6 +500,11 @@ class ImportView(QWidget):
             if result.skipped > len(result.duplicate_rows):
                 preview_dup += "\n..."
             msg += "\nDuplicates (preview):\n" + preview_dup
+        if result.warning_rows:
+            preview_warn = "\n".join(result.warning_rows[:8])
+            if len(result.warning_rows) > 8:
+                preview_warn += "\n..."
+            msg += "\nCloze warnings:\n" + preview_warn
         QMessageBox.information(self, "Import xong", msg)
         self._launch_quiz_with_ids(result.new_ids)
 

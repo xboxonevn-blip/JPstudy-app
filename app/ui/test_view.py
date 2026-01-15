@@ -39,7 +39,7 @@ class MiniTestView(QWidget):
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
 
-        title = QLabel("D - Mini Test (10-20 câu trộn: due + mới + lỗi)")
+        title = QLabel("D - Mini Test (due + mới + lỗi)")
         title.setStyleSheet("font-size: 16px; font-weight: 700;")
         layout.addWidget(title)
 
@@ -75,10 +75,10 @@ class MiniTestView(QWidget):
 
         btn_row = QHBoxLayout()
         self.btn_check = QPushButton("Check")
-        self.btn_show = QPushButton("Show answer")
-        self.btn_next = QPushButton("Next")
-        self.btn_restart = QPushButton("Restart test")
-        self.btn_back = QPushButton("Back Home")
+        self.btn_show = QPushButton("Xem đáp án")
+        self.btn_next = QPushButton("Tiếp")
+        self.btn_restart = QPushButton("Làm lại")
+        self.btn_back = QPushButton("Về Home")
         for b in [self.btn_check, self.btn_show, self.btn_next, self.btn_restart, self.btn_back]:
             b.setCursor(Qt.PointingHandCursor)
 
@@ -114,7 +114,7 @@ class MiniTestView(QWidget):
         self.lbl_feedback.setText("")
         self.ed_answer.setText("")
         if not self.questions:
-            self.lbl_cloze.setText("Chưa có câu nào. Hãy thêm ví dụ hoặc import.")
+            self.lbl_cloze.setText("Chưa có câu nào. Hãy thêm dữ liệu hoặc import.")
             self.lbl_hint.setText("")
             return
 
@@ -122,7 +122,7 @@ class MiniTestView(QWidget):
             total = len(self.questions)
             score = (self.correct / total) * 100 if total else 0.0
             self.lbl_cloze.setText(f"Done! Score: {self.correct}/{total} ({score:.1f}%)")
-            self.lbl_hint.setText("Sai sẽ được đẩy vào sổ lỗi để ôn lại ở B/C.")
+            self.lbl_hint.setText("Sai sẽ được ghi vào sổ lỗi và xuất hiện lại ở B/C.")
             self.btn_check.setEnabled(False)
             self.btn_show.setEnabled(False)
             self.btn_next.setEnabled(False)
@@ -198,6 +198,5 @@ class MiniTestView(QWidget):
         else:
             self.lbl_feedback.setStyleSheet("color:#aa0000;")
             self.lbl_feedback.setText(f"Sai rồi. Đáp án: {expected}")
-            # allow user to hit Next after seeing feedback
             self.index += 1
             self._update_status()

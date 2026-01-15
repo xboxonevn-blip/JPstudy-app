@@ -3,7 +3,16 @@ import sqlite3
 from typing import Callable
 
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QFrame, QPushButton, QHBoxLayout, QMessageBox, QCheckBox
+    QWidget,
+    QVBoxLayout,
+    QLabel,
+    QFrame,
+    QPushButton,
+    QHBoxLayout,
+    QMessageBox,
+    QCheckBox,
+    QLineEdit,
+    QComboBox,
 )
 from PySide6.QtCore import Qt
 
@@ -24,16 +33,27 @@ class SrsReviewView(QWidget):
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
 
-        title = QLabel("SRS Review (Due)")
+        title = QLabel("SRS Review (Thẻ đến hạn)")
         title.setStyleSheet("font-size: 16px; font-weight: 700;")
         layout.addWidget(title)
 
         top_row = QHBoxLayout()
         self.status = QLabel("")
         self.status.setStyleSheet("color:#555;")
-        self.chk_leech = QCheckBox("Leech only")
+        self.chk_leech = QCheckBox("Chỉ leech")
         self.chk_leech.stateChanged.connect(self.refresh)
+
+        self.cb_level = QComboBox()
+        self.cb_level.addItems(["Tất cả", "N5", "N4", "N3", "N2", "N1"])
+        self.cb_level.currentIndexChanged.connect(self.refresh)
+        self.ed_tag = QLineEdit()
+        self.ed_tag.setPlaceholderText("Lọc tag chứa...")
+        self.ed_tag.returnPressed.connect(self.refresh)
+
         top_row.addWidget(self.status, 1)
+        top_row.addWidget(QLabel("JLPT:"))
+        top_row.addWidget(self.cb_level)
+        top_row.addWidget(self.ed_tag)
         top_row.addWidget(self.chk_leech)
         layout.addLayout(top_row)
 
@@ -55,12 +75,12 @@ class SrsReviewView(QWidget):
         layout.addWidget(self.card_frame, 1)
 
         btn_row = QHBoxLayout()
-        self.btn_reveal = QPushButton("Show answer")
+        self.btn_reveal = QPushButton("Xem đáp án")
         self.btn_again = QPushButton("Again")
         self.btn_hard = QPushButton("Hard")
         self.btn_good = QPushButton("Good")
         self.btn_easy = QPushButton("Easy")
-        self.btn_back = QPushButton("Back Home")
+        self.btn_back = QPushButton("Về Home")
 
         for b in [self.btn_reveal, self.btn_again, self.btn_hard, self.btn_good, self.btn_easy, self.btn_back]:
             b.setCursor(Qt.PointingHandCursor)
@@ -84,9 +104,25 @@ class SrsReviewView(QWidget):
 
         self.refresh()
 
+    def _filters(self):
+        level = self.cb_level.currentText()
+        level_filter = None if level == "Tất cả" else level
+        tag_filter = self.ed_tag.text().strip() or None
+        return level_filter, tag_filter
+
     def refresh(self) -> None:
-        self.queue = fetch_due_cards(self.db, limit=300, leech_only=self.chk_leech.isChecked())
-        self.status.setText(f"Queue: {len(self.queue)} cards (leech only: {self.chk_leech.isChecked()})")
+        level_filter, tag_filter = self._filters()
+        self.queue = fetch_due_cards(
+            self.db,
+            limit=300,
+            leech_only=self.chk_leech.isChecked(),
+            tag_filter=tag_filter,
+            level_filter=level_filter,
+        )
+        self.status.setText(
+            f"Queue: {len(self.queue)} | JLPT: {level_filter or 'all'} | tag: {tag_filter or 'all'} "
+            f"| leech only: {self.chk_leech.isChecked()}"
+        )
         self._next_card()
 
     def _next_card(self) -> None:
@@ -95,7 +131,7 @@ class SrsReviewView(QWidget):
         if not self.queue:
             self.current = None
             self.front.setText("Hết thẻ đến hạn hôm nay!")
-            self.status.setText("Bạn có thể quay lại Home hoặc Nạp thêm dữ liệu.")
+            self.status.setText("Bạn có thể quay lại Home hoặc nạp thêm dữ liệu.")
             self.btn_reveal.setEnabled(False)
             for b in [self.btn_again, self.btn_hard, self.btn_good, self.btn_easy]:
                 b.setEnabled(False)
@@ -110,7 +146,7 @@ class SrsReviewView(QWidget):
         reading = self.current["reading"] or ""
         item_type = self.current["item_type"]
         self.front.setText(f"[{item_type}] {term}  {('(' + reading + ')') if reading else ''}".strip())
-        self.status.setText(f"Con lai: {len(self.queue)+1} the")
+        self.status.setText(f"Còn lại: {len(self.queue)+1} thẻ")
 
     def on_reveal(self) -> None:
         if not self.current:
@@ -124,8 +160,8 @@ class SrsReviewView(QWidget):
         is_leech = int(self.current["is_leech"])
         meta = f"ease={ease:.2f} • lapses={lapses}" + (" • LEECH" if is_leech else "")
         text = (
-            f"Nghia: {meaning}\n\n"
-            f"Vi du: {example}\n\n"
+            f"Nghĩa: {meaning}\n\n"
+            f"Ví dụ: {example}\n\n"
             f"Tags: {tags}\n\n"
             f"{meta}"
         )
@@ -137,7 +173,7 @@ class SrsReviewView(QWidget):
         if not self.current:
             return
         if not self.revealed:
-            QMessageBox.information(self, "Goi y", "Hay bam 'Show answer' truoc khi chon diem.")
+            QMessageBox.information(self, "Gợi ý", "Hãy bấm 'Xem đáp án' trước khi chấm.")
             return
 
         state = SrsState(

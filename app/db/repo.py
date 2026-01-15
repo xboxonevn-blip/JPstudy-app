@@ -1,7 +1,7 @@
 from __future__ import annotations
 import re
 import sqlite3
-from typing import List, Optional, Dict, Any, Iterable, Tuple
+from typing import List, Optional, Dict, Any, Iterable, Tuple, Sequence
 from app.core.time_utils import today_date_str, now_iso, add_days
 
 def _normalize_key(term: str, reading: str) -> Tuple[str, str]:
@@ -132,29 +132,33 @@ def create_item_with_card(
 _JP_TOKEN = re.compile(r"[\u3400-\u9FFF\u3040-\u30FF\u3005\u30FC]+")
 
 
-def build_cloze(sentence: str, answer: str) -> Tuple[str, str]:
+def build_cloze_preview(sentence: str, answer: str) -> Tuple[str, str, bool, str]:
     """
-    Create a cloze by replacing the first occurrence of the answer (if present),
-    otherwise blank the first Japanese token (kanji/kana). As a last resort,
-    blank the first couple of characters.
+    Create a cloze and report whether a fallback was used.
+    Returns (cloze, answer, used_fallback, reason).
     """
     placeholder = "____"
     sentence = sentence or ""
     ans = (answer or "").strip()
     if ans and ans in sentence:
-        return (sentence.replace(ans, placeholder, 1), ans)
+        return (sentence.replace(ans, placeholder, 1), ans, False, "exact-term")
 
     m = _JP_TOKEN.search(sentence)
     if m:
         target = m.group(0)
-        return (sentence.replace(target, placeholder, 1), ans or target)
+        return (sentence.replace(target, placeholder, 1), ans or target, True, "jp-token")
 
     stripped = sentence.strip()
     if stripped:
         target = stripped[:2] if len(stripped) > 1 else stripped
-        return (sentence.replace(target, placeholder, 1), ans or target)
+        return (sentence.replace(target, placeholder, 1), ans or target, True, "prefix")
 
-    return (placeholder, ans)
+    return (placeholder, ans, True, "empty")
+
+
+def build_cloze(sentence: str, answer: str) -> Tuple[str, str]:
+    cloze, ans, _, _ = build_cloze_preview(sentence, answer)
+    return cloze, ans
 
 
 def _tag_tokens(tags: str) -> List[str]:
@@ -175,7 +179,30 @@ def count_items(db: sqlite3.Connection) -> int:
     cur = db.execute("SELECT COUNT(*) AS c FROM items")
     return int(cur.fetchone()[0])
 
-def fetch_due_cards(db: sqlite3.Connection, limit: int = 50, leech_only: bool = False) -> List[sqlite3.Row]:
+def _apply_tag_filter_sql(
+    base_query: str,
+    params: List[Any],
+    tag_filter: Optional[str],
+    level_filter: Optional[str],
+) -> Tuple[str, List[Any]]:
+    if tag_filter:
+        base_query += " AND lower(COALESCE(i.tags,'')) LIKE '%'||lower(?)||'%'"
+        params.append(tag_filter.strip())
+    if level_filter:
+        lvl = level_filter.strip()
+        if lvl:
+            base_query += " AND (','||lower(COALESCE(i.tags,''))||',') LIKE '%'||lower(?)||'%'"
+            params.append(lvl)
+    return base_query, params
+
+
+def fetch_due_cards(
+    db: sqlite3.Connection,
+    limit: int = 50,
+    leech_only: bool = False,
+    tag_filter: Optional[str] = None,
+    level_filter: Optional[str] = None,
+) -> List[sqlite3.Row]:
     # Fetch due cards joined with item fields
     query = """
         SELECT c.*, i.item_type, i.term, i.reading, i.meaning, i.example, i.tags
@@ -186,6 +213,7 @@ def fetch_due_cards(db: sqlite3.Connection, limit: int = 50, leech_only: bool = 
     params: List[Any] = [today_date_str()]
     if leech_only:
         query += " AND c.is_leech = 1"
+    query, params = _apply_tag_filter_sql(query, params, tag_filter, level_filter)
     query += " ORDER BY c.is_leech DESC, c.lapses DESC, c.due_date ASC, c.id ASC LIMIT ?"
     params.append(limit)
     cur = db.execute(query, params)
@@ -395,6 +423,37 @@ def get_review_stats(db: sqlite3.Connection, date_str: Optional[str] = None) -> 
     return {"date": date_str, "total": total, "correct": correct, "accuracy": accuracy}
 
 
+def get_attempt_timeseries(db: sqlite3.Connection, days: int = 7) -> List[Dict[str, Any]]:
+    """
+    Aggregate attempts per day for the last N days (including today).
+    """
+    cur = db.execute(
+        """
+        SELECT substr(created_at,1,10) AS d, COUNT(*) AS total, SUM(is_correct) AS correct
+        FROM attempts
+        WHERE is_correct IS NOT NULL AND date(created_at) >= date('now', ?)
+        GROUP BY d
+        ORDER BY d DESC
+        LIMIT ?
+        """,
+        (f"-{max(0, days-1)} days", days),
+    )
+    rows = cur.fetchall()
+    out: List[Dict[str, Any]] = []
+    for row in rows:
+        total = int(row["total"] or 0)
+        correct = int(row["correct"] or 0)
+        out.append(
+            {
+                "date": row["d"],
+                "total": total,
+                "correct": correct,
+                "accuracy": (correct / total * 100) if total else 0.0,
+            }
+        )
+    return out
+
+
 def get_attempt_stats(db: sqlite3.Connection, date_str: Optional[str] = None) -> Dict[str, Any]:
     """
     Aggregate attempts (SRS, cloze, test, etc.) for a day to surface holistic activity.
@@ -501,12 +560,16 @@ def get_items_by_ids(db: sqlite3.Connection, ids: Iterable[int]) -> List[sqlite3
     return list(cur.fetchall())
 
 
-def get_cloze_queue(db: sqlite3.Connection, limit: int = 50) -> List[Dict[str, Any]]:
+def get_cloze_queue(
+    db: sqlite3.Connection,
+    limit: int = 50,
+    tag_filter: Optional[str] = None,
+    level_filter: Optional[str] = None,
+) -> List[Dict[str, Any]]:
     """
     Fetch sentences with cloze/answer for practice, prioritizing items with mistakes (sentence/test).
     """
-    cur = db.execute(
-        """
+    query = """
         SELECT
             s.id AS sentence_id,
             s.sentence,
@@ -524,21 +587,30 @@ def get_cloze_queue(db: sqlite3.Connection, limit: int = 50) -> List[Dict[str, A
         JOIN items i ON i.id = s.item_id
         LEFT JOIN mistakes m ON m.item_id = s.item_id AND m.source IN ('sentence','test')
         WHERE s.sentence IS NOT NULL AND trim(s.sentence) <> ''
+    """
+    params: List[Any] = []
+    query, params = _apply_tag_filter_sql(query, params, tag_filter, level_filter)
+    query += """
         ORDER BY (m.last_mistake_at IS NOT NULL) DESC, m.last_mistake_at DESC, s.id DESC
         LIMIT ?
-        """,
-        (limit,),
-    )
+    """
+    params.append(limit)
+
+    cur = db.execute(query, params)
     rows = cur.fetchall()
 
     out: List[Dict[str, Any]] = []
     updates: List[Tuple[str, str, int]] = []  # cloze, answer, id
     for row in rows:
-        cloze = row["cloze"]
         answer = row["answer"] or row["term"]
+        cloze = row["cloze"]
+        used_fallback = False
+        reason = ""
         if not cloze:
-            cloze, answer = build_cloze(row["sentence"], answer)
+            cloze, answer, used_fallback, reason = build_cloze_preview(row["sentence"], answer)
             updates.append((cloze, answer, row["sentence_id"]))
+        else:
+            _, _, used_fallback, reason = build_cloze_preview(row["sentence"], answer)
         out.append(
             {
                 "sentence_id": row["sentence_id"],
@@ -553,6 +625,8 @@ def get_cloze_queue(db: sqlite3.Connection, limit: int = 50) -> List[Dict[str, A
                 "tags": row["tags"],
                 "mistake_count": row["mistake_count"],
                 "last_mistake_at": row["last_mistake_at"],
+                "cloze_fallback": used_fallback,
+                "cloze_reason": reason,
             }
         )
 
@@ -716,3 +790,34 @@ def get_test_batch(db: sqlite3.Connection, total: int = 15) -> List[Dict[str, An
             break
 
     return unique_questions
+
+
+def get_attempt_rows_for_export(
+    db: sqlite3.Connection,
+    sources: Optional[Sequence[str]] = None,
+    days: int = 30,
+    limit: int = 2000,
+) -> List[sqlite3.Row]:
+    """
+    Fetch attempts for CSV export.
+    """
+    where = ["1=1"]
+    params: List[Any] = []
+    if sources:
+        placeholders = ",".join("?" for _ in sources)
+        where.append(f"source IN ({placeholders})")
+        params.extend(sources)
+    if days:
+        where.append("date(created_at) >= date('now', ?)")
+        params.append(f"-{max(0, days-1)} days")
+    sql = f"""
+        SELECT created_at, source, item_id, card_id, sentence_id, test_id, test_attempt_id,
+               prompt, response, expected, is_correct, score
+        FROM attempts
+        WHERE {' AND '.join(where)}
+        ORDER BY created_at DESC
+        LIMIT ?
+    """
+    params.append(limit)
+    cur = db.execute(sql, params)
+    return list(cur.fetchall())

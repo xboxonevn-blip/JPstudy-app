@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QHBoxLayout,
     QLineEdit,
+    QComboBox,
 )
 from PySide6.QtCore import Qt
 
@@ -28,14 +29,23 @@ class ClozePracticeView(QWidget):
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
 
-        title = QLabel("C - Cloze Practice (Dùng được trong câu)")
+        title = QLabel("C - Luyện Cloze (điền trống)")
         title.setStyleSheet("font-size: 16px; font-weight: 700;")
         layout.addWidget(title)
 
         top_row = QHBoxLayout()
         self.status = QLabel("")
         self.status.setStyleSheet("color:#555;")
+        self.cb_level = QComboBox()
+        self.cb_level.addItems(["Tất cả", "N5", "N4", "N3", "N2", "N1"])
+        self.cb_level.currentIndexChanged.connect(self.refresh)
+        self.ed_tag = QLineEdit()
+        self.ed_tag.setPlaceholderText("Lọc tag chứa...")
+        self.ed_tag.returnPressed.connect(self.refresh)
         top_row.addWidget(self.status, 1)
+        top_row.addWidget(QLabel("JLPT:"))
+        top_row.addWidget(self.cb_level)
+        top_row.addWidget(self.ed_tag)
         layout.addLayout(top_row)
 
         self.card_frame = QFrame()
@@ -67,9 +77,9 @@ class ClozePracticeView(QWidget):
 
         btn_row = QHBoxLayout()
         self.btn_check = QPushButton("Check")
-        self.btn_show = QPushButton("Show answer")
-        self.btn_next = QPushButton("Next")
-        self.btn_back = QPushButton("Back Home")
+        self.btn_show = QPushButton("Xem đáp án")
+        self.btn_next = QPushButton("Tiếp")
+        self.btn_back = QPushButton("Về Home")
         for b in [self.btn_check, self.btn_show, self.btn_next, self.btn_back]:
             b.setCursor(Qt.PointingHandCursor)
 
@@ -87,9 +97,23 @@ class ClozePracticeView(QWidget):
 
         self.refresh()
 
+    def _filters(self):
+        level = self.cb_level.currentText()
+        level_filter = None if level == "Tất cả" else level
+        tag_filter = self.ed_tag.text().strip() or None
+        return level_filter, tag_filter
+
     def refresh(self) -> None:
-        self.queue = get_cloze_queue(self.db, limit=50)
-        self.status.setText(f"Queue: {len(self.queue)} câu (ưu tiên sổ lỗi)")
+        level_filter, tag_filter = self._filters()
+        self.queue = get_cloze_queue(
+            self.db,
+            limit=50,
+            tag_filter=tag_filter,
+            level_filter=level_filter,
+        )
+        self.status.setText(
+            f"Queue: {len(self.queue)} câu (ưu tiên lỗi) | JLPT: {level_filter or 'all'} | tag: {tag_filter or 'all'}"
+        )
         self._next_card()
 
     def _next_card(self) -> None:
@@ -97,7 +121,7 @@ class ClozePracticeView(QWidget):
         self.ed_answer.setText("")
         if not self.queue:
             self.current = None
-            self.lbl_cloze.setText("Hết câu để luyện. Hãy thêm ví dụ hoặc import thêm.")
+            self.lbl_cloze.setText("Hết câu để luyện. Hãy thêm dữ liệu hoặc quay lại sau.")
             self.lbl_hint.setText("")
             self.btn_check.setEnabled(False)
             self.btn_show.setEnabled(False)
@@ -113,9 +137,12 @@ class ClozePracticeView(QWidget):
         meaning = self.current.get("meaning") or ""
         reading = self.current.get("reading") or ""
         term = self.current.get("term") or ""
+        fallback = self.current.get("cloze_fallback")
+        reason = self.current.get("cloze_reason") or ""
+        warn = " ⚠ Cloze fallback" if fallback else ""
         self.lbl_cloze.setText(cloze)
-        self.lbl_hint.setText(f"Gợi ý: {meaning}  ({term} {reading})".strip())
-        self.status.setText(f"Còn lại: {len(self.queue)+1} câu")
+        self.lbl_hint.setText(f"Gợi ý: {meaning}  ({term} {reading}){warn}".strip())
+        self.status.setText(f"Cần luyện: {len(self.queue)+1} câu | {reason}")
         self.ed_answer.setFocus()
 
     def on_show(self) -> None:
@@ -131,11 +158,12 @@ class ClozePracticeView(QWidget):
         response = self.ed_answer.text().strip()
         expected = (self.current.get("answer") or self.current.get("term") or "").strip()
         is_correct = response.lower() == expected.lower() if expected else False
+        item_id = self.current.get("item_id")
 
         attempt_id = record_attempt(
             self.db,
             source="sentence",
-            item_id=self.current.get("item_id"),
+            item_id=item_id,
             sentence_id=self.current.get("sentence_id"),
             prompt=self.current.get("cloze") or "",
             response=response,
@@ -143,7 +171,6 @@ class ClozePracticeView(QWidget):
             is_correct=is_correct,
         )
 
-        item_id = self.current.get("item_id")
         if not is_correct and item_id is not None:
             record_mistake(
                 self.db,

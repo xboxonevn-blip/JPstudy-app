@@ -1,6 +1,6 @@
 from __future__ import annotations
 import sqlite3
-from PySide6.QtWidgets import QMainWindow, QWidget, QStackedWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel
+from PySide6.QtWidgets import QMainWindow, QWidget, QStackedWidget, QVBoxLayout, QHBoxLayout, QPushButton
 from PySide6.QtCore import Qt
 
 from app.ui.home_view import HomeView
@@ -9,11 +9,12 @@ from app.ui.srs_view import SrsReviewView
 from app.ui.cloze_view import ClozePracticeView
 from app.ui.test_view import MiniTestView
 
+
 class MainWindow(QMainWindow):
     def __init__(self, db: sqlite3.Connection):
         super().__init__()
         self.db = db
-        self.setWindowTitle("App học tiếng Nhật — A→B→C→D (Template)")
+        self.setWindowTitle("App học tiếng Nhật - A/B/C/D")
         self.resize(980, 640)
 
         root = QWidget()
@@ -42,10 +43,10 @@ class MainWindow(QMainWindow):
         nav.setSpacing(8)
 
         self.btn_home = QPushButton("Home")
-        self.btn_import = QPushButton("A — Nạp")
-        self.btn_srs = QPushButton("B — SRS")
-        self.btn_c = QPushButton("C — Luyện câu")
-        self.btn_d = QPushButton("D — Thi thử")
+        self.btn_import = QPushButton("A - Nhập")
+        self.btn_srs = QPushButton("B - SRS")
+        self.btn_c = QPushButton("C - Luyện câu")
+        self.btn_d = QPushButton("D - Thi thử")
 
         for b in [self.btn_home, self.btn_import, self.btn_srs, self.btn_c, self.btn_d]:
             b.setCursor(Qt.PointingHandCursor)
