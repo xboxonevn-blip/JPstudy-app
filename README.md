@@ -33,6 +33,11 @@ pip install -r requirements.txt
 python main.py
 ```
 
+Nếu gặp lỗi thiếu libGL/libxcb khi import PySide6 (Linux/headless):
+- Với Debian/Ubuntu: `bash scripts/setup-ui-deps.sh`
+- Hoặc tự cài: `sudo apt-get install -y libgl1 libglib2.0-0 libx11-xcb1 libxcb-render0 libxcb-shape0 libxcb-xfixes0`
+- Chạy headless: `QT_QPA_PLATFORM=offscreen python main.py` hoặc `xvfb-run -s "-screen 0 1280x720x24" python main.py`
+
 ---
 
 ## 2) Import CSV (Nạp)
