@@ -3,7 +3,7 @@ import sqlite3
 import csv
 import os
 import random
-from typing import Callable, Optional, List
+from typing import Callable, Optional, List, Tuple
 from dataclasses import dataclass, field
 
 from PySide6.QtWidgets import (
@@ -21,10 +21,12 @@ from PySide6.QtWidgets import (
     QTextEdit,
     QDialog,
     QDialogButtonBox,
+    QProgressDialog,
 )
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QThread, QObject, Signal
 
 from app.db.repo import create_item_with_card, count_items, get_items_by_ids, build_cloze_preview
+from app.db.database import new_db_connection, init_db
 
 
 @dataclass
@@ -189,12 +191,74 @@ class QuickQuizDialog(QDialog):
         self.show_card()
 
 
+class ImportWorker(QObject):
+    progress = Signal(int, int, str)  # done, total, file name
+    finished = Signal(ImportResult)
+    error = Signal(str)
+
+    def __init__(self, view: "ImportView", tasks: List[Tuple[str, Optional[str]]]):
+        super().__init__()
+        self.view = view
+        self.tasks = tasks
+        self._stop = False
+
+    def stop(self):
+        self._stop = True
+
+    def _count_rows(self, path: str) -> int:
+        try:
+            with open(path, "r", encoding="utf-8-sig") as f:
+                return max(0, sum(1 for _ in f) - 1)
+        except Exception:
+            return 0
+
+    def run(self):
+        try:
+            db = new_db_connection()
+            init_db(db)
+            total_rows = sum(self._count_rows(p) for p, _ in self.tasks)
+            total_rows = total_rows if total_rows > 0 else 1
+            processed = 0
+            agg = ImportResult()
+
+            for path, level_tag in self.tasks:
+                rows_in_file = max(1, self._count_rows(path))
+
+                def progress_cb(done_file: int, total_file: int):
+                    if self._stop:
+                        raise RuntimeError("cancelled")
+                    self.progress.emit(processed + done_file, total_rows, os.path.basename(path))
+
+                result = self.view._import_csv(
+                    path,
+                    level_tag=level_tag,
+                    progress_cb=progress_cb,
+                    db_conn=db,
+                    total_rows_hint=rows_in_file,
+                )
+                processed += rows_in_file
+                agg.imported += result.imported
+                agg.errors += result.errors
+                agg.skipped += result.skipped
+                agg.new_ids.extend(result.new_ids)
+                agg.error_rows.extend(result.error_rows)
+                agg.duplicate_rows.extend(result.duplicate_rows)
+                agg.warning_rows.extend(result.warning_rows)
+
+            self.finished.emit(agg)
+        except Exception as e:
+            self.error.emit(str(e))
+
+
 class ImportView(QWidget):
     def __init__(self, db: sqlite3.Connection, on_navigate: Callable[[str], None]):
         super().__init__()
         self.db = db
         self.on_navigate = on_navigate
         self.data_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "data"))
+
+        self._pending_missing: List[str] = []
+        self._import_mode = "manual"
 
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
@@ -312,7 +376,6 @@ class ImportView(QWidget):
             return csv.excel
 
     def _map_row(self, row: dict, level_tag: Optional[str]) -> dict:
-        # Normalize keys to lowercase for detection
         keys = {k.lower(): k for k in row.keys()}
 
         def pick(*names: str) -> str:
@@ -349,7 +412,22 @@ class ImportView(QWidget):
             "tags": tags,
         }
 
-    def _import_csv(self, path: str, level_tag: Optional[str] = None) -> ImportResult:
+    def _count_rows(self, path: str) -> int:
+        try:
+            with open(path, "r", encoding="utf-8-sig") as f:
+                return max(0, sum(1 for _ in f) - 1)
+        except Exception:
+            return 0
+
+    def _import_csv(
+        self,
+        path: str,
+        level_tag: Optional[str] = None,
+        progress_cb: Optional[Callable[[int, int], None]] = None,
+        db_conn: Optional[sqlite3.Connection] = None,
+        total_rows_hint: Optional[int] = None,
+    ) -> ImportResult:
+        db = db_conn or self.db
         imported = 0
         errors = 0
         skipped = 0
@@ -357,6 +435,9 @@ class ImportView(QWidget):
         duplicate_rows: List[str] = []
         warning_rows: List[str] = []
         new_ids: List[int] = []
+
+        total_rows = total_rows_hint or self._count_rows(path) or 1
+        processed_file = 0
 
         with open(path, "r", encoding="utf-8-sig", newline="") as f:
             sample = f.read(2048)
@@ -374,7 +455,7 @@ class ImportView(QWidget):
                         if used_fallback:
                             warning_rows.append(f"Row {row_num}: cloze fallback ({reason}) - term không có trong câu?")
                     new_id, created = create_item_with_card(
-                        self.db,
+                        db,
                         item_type=data["item_type"],
                         term=data["term"],
                         reading=data["reading"],
@@ -392,6 +473,10 @@ class ImportView(QWidget):
                     errors += 1
                     msg = str(e).strip() or e.__class__.__name__
                     error_rows.append(f"Row {row_num}: {msg}")
+                finally:
+                    processed_file += 1
+                    if progress_cb:
+                        progress_cb(min(processed_file, total_rows), total_rows)
 
         return ImportResult(
             imported=imported,
@@ -403,6 +488,45 @@ class ImportView(QWidget):
             warning_rows=warning_rows,
         )
 
+    def _start_worker(self, tasks: List[Tuple[str, Optional[str]]], mode: str, missing: Optional[List[str]] = None):
+        if not tasks:
+            return
+        self._import_mode = mode
+        self._pending_missing = missing or []
+        dialog = QProgressDialog("Đang import...", "Hủy", 0, 100, self)
+        dialog.setWindowModality(Qt.WindowModal)
+        dialog.setMinimumDuration(0)
+
+        thread = QThread(self)
+        worker = ImportWorker(self, tasks)
+        worker.moveToThread(thread)
+
+        def on_progress(done: int, total: int, fname: str):
+            percent = int(done / total * 100) if total else 0
+            dialog.setLabelText(f"Đang import {fname} ({done}/{total})")
+            dialog.setValue(percent)
+
+        def cleanup():
+            dialog.close()
+            worker.deleteLater()
+            thread.quit()
+            thread.wait()
+
+        def on_finished(result: ImportResult):
+            cleanup()
+            self._handle_result(result)
+
+        def on_error(msg: str):
+            cleanup()
+            QMessageBox.critical(self, "Import lỗi", msg)
+
+        worker.progress.connect(on_progress)
+        worker.finished.connect(on_finished)
+        worker.error.connect(on_error)
+        dialog.canceled.connect(worker.stop)
+        thread.started.connect(worker.run)
+        thread.start()
+
     def on_auto_import(self):
         level = (self.cb_level.currentText() or "").strip().upper()
         if level == "ALL":
@@ -410,66 +534,20 @@ class ImportView(QWidget):
         else:
             levels = [level]
 
-        missing = []
-        total_imported = 0
-        total_errors = 0
-        total_skipped = 0
-        error_rows_all: List[str] = []
-        duplicate_rows_all: List[str] = []
-        warning_rows_all: List[str] = []
-        new_ids: List[int] = []
-
+        tasks: List[Tuple[str, Optional[str]]] = []
+        missing: List[str] = []
         for lvl in levels:
             path = self._data_path_for_level(lvl)
             if not path:
                 missing.append(lvl)
                 continue
-            try:
-                result = self._import_csv(path, level_tag=lvl)
-            except Exception as e:
-                QMessageBox.critical(self, "Import error", f"{lvl}: {e}")
-                return
-            total_imported += result.imported
-            total_errors += result.errors
-            total_skipped += result.skipped
-            error_rows_all.extend([f"{lvl} - {msg}" for msg in result.error_rows])
-            duplicate_rows_all.extend([f"{lvl} - {msg}" for msg in result.duplicate_rows])
-            warning_rows_all.extend([f"{lvl} - {msg}" for msg in result.warning_rows])
-            new_ids.extend(result.new_ids)
+            tasks.append((path, lvl))
 
-        if total_imported == 0 and total_errors == 0 and missing:
-            QMessageBox.warning(
-                self,
-                "Missing data",
-                "No data files found for: " + ", ".join(missing),
-            )
+        if not tasks and missing:
+            QMessageBox.warning(self, "Missing data", "No data files found for: " + ", ".join(missing))
             return
 
-        self.refresh()
-        msg = (
-            f"Imported: {total_imported} rows. "
-            f"Duplicates merged/skipped: {total_skipped}. "
-            f"Errors: {total_errors} rows."
-        )
-        if missing:
-            msg += " Missing files for: " + ", ".join(missing) + "."
-        if total_errors and error_rows_all:
-            preview = "\n".join(error_rows_all[:8])
-            if total_errors > len(error_rows_all):
-                preview += "\n..."
-            msg += "\nError rows (preview):\n" + preview
-        if total_skipped and duplicate_rows_all:
-            preview_dup = "\n".join(duplicate_rows_all[:8])
-            if total_skipped > len(duplicate_rows_all):
-                preview_dup += "\n..."
-            msg += "\nDuplicates (preview):\n" + preview_dup
-        if warning_rows_all:
-            preview_warn = "\n".join(warning_rows_all[:8])
-            if len(warning_rows_all) > 8:
-                preview_warn += "\n..."
-            msg += "\nCloze warnings:\n" + preview_warn
-        QMessageBox.information(self, "Auto import done", msg)
-        self._launch_quiz_with_ids(new_ids)
+        self._start_worker(tasks, mode="auto", missing=missing)
 
     def on_import_csv(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -477,19 +555,17 @@ class ImportView(QWidget):
         )
         if not path:
             return
+        self._start_worker([(path, None)], mode="manual")
 
-        try:
-            result = self._import_csv(path)
-        except Exception as e:
-            QMessageBox.critical(self, "Import lỗi", str(e))
-            return
-
+    def _handle_result(self, result: ImportResult):
         self.refresh()
         msg = (
             f"Đã import: {result.imported} dòng. "
             f"Trùng (merge/skip): {result.skipped} dòng. "
             f"Lỗi: {result.errors} dòng."
         )
+        if self._pending_missing:
+            msg += " Missing files for: " + ", ".join(self._pending_missing) + "."
         if result.errors and result.error_rows:
             preview = "\n".join(result.error_rows[:8])
             if result.errors > len(result.error_rows):
@@ -505,7 +581,9 @@ class ImportView(QWidget):
             if len(result.warning_rows) > 8:
                 preview_warn += "\n..."
             msg += "\nCloze warnings:\n" + preview_warn
-        QMessageBox.information(self, "Import xong", msg)
+
+        title = "Auto import done" if self._import_mode == "auto" else "Import xong"
+        QMessageBox.information(self, title, msg)
         self._launch_quiz_with_ids(result.new_ids)
 
     def _launch_quiz_with_ids(self, ids: List[int]) -> None:

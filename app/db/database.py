@@ -28,3 +28,14 @@ def init_db(db: sqlite3.Connection) -> None:
     # idempotent schema creation
     from .schema import ensure_schema
     ensure_schema(db)
+
+
+def new_db_connection() -> sqlite3.Connection:
+    """
+    Create a new SQLite connection for background work (thread-safe).
+    """
+    path = _db_path()
+    conn = sqlite3.connect(path, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON;")
+    return conn

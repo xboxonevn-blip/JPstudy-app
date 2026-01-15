@@ -10,6 +10,9 @@ from PySide6.QtWidgets import (
     QPushButton,
     QHBoxLayout,
     QLineEdit,
+    QSpinBox,
+    QCheckBox,
+    QComboBox,
 )
 from PySide6.QtCore import Qt
 
@@ -18,6 +21,8 @@ from app.db.repo import (
     record_attempt,
     record_mistake,
     resolve_mistake,
+    record_error,
+    resolve_errors_for_item,
     get_or_create_test,
     create_test_attempt,
     update_test_attempt,
@@ -39,9 +44,35 @@ class MiniTestView(QWidget):
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
 
-        title = QLabel("D - Mini Test (due + mới + lỗi)")
+        title = QLabel("D - Mini Test (tùy biến)")
         title.setStyleSheet("font-size: 16px; font-weight: 700;")
         layout.addWidget(title)
+
+        cfg_row = QHBoxLayout()
+        self.sp_total = QSpinBox()
+        self.sp_total.setRange(5, 30)
+        self.sp_total.setValue(15)
+        self.cb_only_mistake = QCheckBox("Chỉ Mistake")
+        self.cb_only_due = QCheckBox("Chỉ Due")
+        self.cb_level = QComboBox()
+        self.cb_level.addItems(["Tất cả", "N5", "N4", "N3", "N2", "N1"])
+        self.ed_tag = QLineEdit()
+        self.ed_tag.setPlaceholderText("Lọc tag chứa...")
+        self.btn_reload = QPushButton("Làm bài")
+        self.btn_reload.clicked.connect(self.start_new_test)
+        for b in [self.cb_only_mistake, self.cb_only_due, self.btn_reload]:
+            b.setCursor(Qt.PointingHandCursor)
+
+        cfg_row.addWidget(QLabel("Số câu:"))
+        cfg_row.addWidget(self.sp_total)
+        cfg_row.addWidget(self.cb_only_mistake)
+        cfg_row.addWidget(self.cb_only_due)
+        cfg_row.addWidget(QLabel("JLPT:"))
+        cfg_row.addWidget(self.cb_level)
+        cfg_row.addWidget(self.ed_tag)
+        cfg_row.addStretch(1)
+        cfg_row.addWidget(self.btn_reload)
+        layout.addLayout(cfg_row)
 
         self.status = QLabel("")
         self.status.setStyleSheet("color:#555;")
@@ -99,7 +130,17 @@ class MiniTestView(QWidget):
         self.start_new_test()
 
     def start_new_test(self) -> None:
-        self.questions = get_test_batch(self.db, total=15)
+        level = self.cb_level.currentText()
+        level_filter = None if level == "Tất cả" else level
+        tag_filter = self.ed_tag.text().strip() or None
+        self.questions = get_test_batch(
+            self.db,
+            total=self.sp_total.value(),
+            only_mistake=self.cb_only_mistake.isChecked(),
+            only_due=self.cb_only_due.isChecked(),
+            tag_filter=tag_filter,
+            level_filter=level_filter,
+        )
         self.index = 0
         self.correct = 0
         self.test_id = get_or_create_test(self.db, title="Mini Test")
@@ -108,7 +149,12 @@ class MiniTestView(QWidget):
 
     def _update_status(self) -> None:
         total = len(self.questions)
-        self.status.setText(f"Câu {self.index+1}/{total} | Đúng: {self.correct}")
+        level = self.cb_level.currentText()
+        tag_filter = self.ed_tag.text().strip() or "all"
+        mode = "mistake" if self.cb_only_mistake.isChecked() else ("due" if self.cb_only_due.isChecked() else "mix")
+        self.status.setText(
+            f"Câu {self.index+1}/{total} | Đúng: {self.correct} | mode={mode} | JLPT={level} | tag={tag_filter}"
+        )
 
     def _next_question(self) -> None:
         self.lbl_feedback.setText("")
@@ -182,12 +228,20 @@ class MiniTestView(QWidget):
                 card_id=q.get("card_id"),
                 last_attempt_id=attempt_id,
             )
+            record_error(
+                self.db,
+                item_id=int(item_id),
+                source="D",
+                error_type="test_wrong",
+                note=f"expected={expected}; response={response}",
+            )
         elif is_correct and item_id is not None:
             resolve_mistake(
                 self.db,
                 item_id=int(item_id),
                 source="test",
             )
+            resolve_errors_for_item(self.db, item_id=int(item_id), source="D")
 
         if is_correct:
             self.correct += 1

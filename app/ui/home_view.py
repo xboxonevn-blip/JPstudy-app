@@ -1,9 +1,13 @@
 from __future__ import annotations
 import sqlite3
 import csv
-from typing import Callable, List
+from typing import Callable, List, Optional
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QFrame, QPushButton, QFileDialog
 from PySide6.QtCore import Qt
+try:
+    from PySide6.QtCharts import QChart, QChartView, QBarSet, QBarSeries, QBarCategoryAxis, QValueAxis, QLineSeries
+except Exception:
+    QChart = None  # type: ignore
 
 from app.db.repo import (
     count_due_cards,
@@ -23,6 +27,7 @@ class HomeView(QWidget):
         super().__init__()
         self.db = db
         self.on_navigate = on_navigate
+        self.chart_view: Optional[QChartView] = None
 
         layout = QVBoxLayout(self)
         layout.setSpacing(12)
@@ -46,6 +51,11 @@ class HomeView(QWidget):
         self.daily_stats = QLabel("")
         self.daily_stats.setStyleSheet("font-size: 13px; color:#444;")
         layout.addWidget(self.daily_stats)
+
+        if QChart:
+            self.chart_view = QChartView()
+            self.chart_view.setMinimumHeight(220)
+            layout.addWidget(self.chart_view)
 
         card = QFrame()
         card.setFrameShape(QFrame.StyledPanel)
@@ -124,8 +134,11 @@ class HomeView(QWidget):
             for row in timeseries:
                 lines.append(f"{row['date']}: {row['total']} ({row['accuracy']:.0f}% đúng)")
             self.daily_stats.setText("Tiến độ 7 ngày: " + " | ".join(lines))
+            self._update_chart(timeseries)
         else:
             self.daily_stats.setText("Chưa có dữ liệu 7 ngày.")
+            if self.chart_view:
+                self.chart_view.setChart(QChart())
 
         self.btn_start_srs.setEnabled(due > 0)
 
@@ -160,3 +173,44 @@ class HomeView(QWidget):
             writer.writerow(headers)
             for r in rows:
                 writer.writerow([r[h] for h in headers])
+
+    def _update_chart(self, timeseries: List[dict]) -> None:
+        if not self.chart_view or not QChart:
+            return
+        chart = QChart()
+        chart.setAnimationOptions(QChart.SeriesAnimations)
+        categories = [row["date"] for row in reversed(timeseries)]
+
+        bar_set = QBarSet("Attempts")
+        for row in reversed(timeseries):
+            bar_set << row["total"]
+        bar_series = QBarSeries()
+        bar_series.append(bar_set)
+
+        line_series = QLineSeries()
+        line_series.setName("Accuracy %")
+        for idx, row in enumerate(reversed(timeseries)):
+            line_series.append(idx, row["accuracy"])
+
+        chart.addSeries(bar_series)
+        chart.addSeries(line_series)
+
+        axis_x = QBarCategoryAxis()
+        axis_x.append(categories)
+        chart.addAxis(axis_x, Qt.AlignBottom)
+        bar_series.attachAxis(axis_x)
+        line_series.attachAxis(axis_x)
+
+        axis_y = QValueAxis()
+        axis_y.setTitleText("Attempts")
+        chart.addAxis(axis_y, Qt.AlignLeft)
+        bar_series.attachAxis(axis_y)
+
+        axis_y2 = QValueAxis()
+        axis_y2.setRange(0, 100)
+        axis_y2.setTitleText("Accuracy %")
+        chart.addAxis(axis_y2, Qt.AlignRight)
+        line_series.attachAxis(axis_y2)
+
+        chart.setTitle("7 ngày gần nhất")
+        self.chart_view.setChart(chart)

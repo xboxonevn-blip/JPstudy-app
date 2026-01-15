@@ -324,6 +324,47 @@ def record_mistake(
     return mistake_id
 
 
+def record_error(
+    db: sqlite3.Connection,
+    item_id: Optional[int],
+    source: str,
+    error_type: str,
+    note: str = "",
+    commit: bool = True,
+) -> Optional[int]:
+    """
+    Log into errors table for post-mortem analysis.
+    """
+    if item_id is None:
+        return None
+    cur = db.execute(
+        """INSERT INTO errors(item_id, source, error_type, note, created_at, resolved)
+             VALUES(?,?,?,?,?,0)""",
+        (item_id, source, error_type, note, now_iso()),
+    )
+    if commit:
+        db.commit()
+    return int(cur.lastrowid)
+
+
+def resolve_errors_for_item(
+    db: sqlite3.Connection,
+    item_id: int,
+    source: Optional[str] = None,
+    commit: bool = True,
+) -> int:
+    """
+    Mark errors as resolved when user answers correctly later.
+    """
+    if source:
+        cur = db.execute("UPDATE errors SET resolved=1 WHERE item_id=? AND source=?", (item_id, source))
+    else:
+        cur = db.execute("UPDATE errors SET resolved=1 WHERE item_id=?", (item_id,))
+    if commit:
+        db.commit()
+    return cur.rowcount
+
+
 def resolve_mistake(
     db: sqlite3.Connection,
     item_id: int,
@@ -702,26 +743,34 @@ def _question_from_row(row: sqlite3.Row, source_label: str, updates: List[Tuple[
     }
 
 
-def get_test_batch(db: sqlite3.Connection, total: int = 15) -> List[Dict[str, Any]]:
+def get_test_batch(
+    db: sqlite3.Connection,
+    total: int = 15,
+    only_mistake: bool = False,
+    only_due: bool = False,
+    tag_filter: Optional[str] = None,
+    level_filter: Optional[str] = None,
+) -> List[Dict[str, Any]]:
     """
     Build a mini-test batch mixing: mistakes (sentence/test/srs), due, and fresh sentences.
     """
     total = max(5, min(total, 30))
-    want_mistake = min(8, total // 3 + 2)
-    want_due = min(8, total // 3 + 2)
+    want_mistake = total if only_mistake else min(8, total // 3 + 2)
+    want_due = total if only_due else min(8, total // 3 + 2)
     want_new = total * 2  # grab extra then trim
 
     updates: List[Tuple[str, str, int]] = []
     questions: List[Dict[str, Any]] = []
 
-    def fetch(query: str, params: tuple, label: str, limit: int) -> None:
+    def fetch(query: str, params: List[Any], label: str, limit: int) -> None:
         nonlocal questions
-        cur = db.execute(query + " LIMIT ?", params + (limit,))
+        q = query + " LIMIT ?"
+        cur = db.execute(q, params + [limit])
         for row in cur.fetchall():
             questions.append(_question_from_row(row, label, updates))
 
-    fetch(
-        """
+    # Mistake first
+    mq = """
         SELECT
             s.id AS sentence_id, s.sentence, s.cloze, s.answer,
             i.id AS item_id, i.item_type, i.term, i.reading, i.meaning, i.tags,
@@ -730,45 +779,43 @@ def get_test_batch(db: sqlite3.Connection, total: int = 15) -> List[Dict[str, An
         JOIN sentences s ON s.item_id = m.item_id
         JOIN items i ON i.id = s.item_id
         WHERE m.source IN ('sentence','test','srs')
-        ORDER BY m.last_mistake_at DESC
-        """,
-        tuple(),
-        "mistake",
-        want_mistake,
-    )
+    """
+    mparams: List[Any] = []
+    mq, mparams = _apply_tag_filter_sql(mq, mparams, tag_filter, level_filter)
+    mq += " ORDER BY m.last_mistake_at DESC"
+    fetch(mq, mparams, "mistake", want_mistake)
 
-    fetch(
+    if not only_mistake:
+        dq = """
+            SELECT
+                s.id AS sentence_id, s.sentence, s.cloze, s.answer,
+                i.id AS item_id, i.item_type, i.term, i.reading, i.meaning, i.tags,
+                c.id AS card_id
+            FROM cards c
+            JOIN items i ON i.id = c.item_id
+            JOIN sentences s ON s.item_id = c.item_id
+            WHERE c.due_date <= ?
         """
-        SELECT
-            s.id AS sentence_id, s.sentence, s.cloze, s.answer,
-            i.id AS item_id, i.item_type, i.term, i.reading, i.meaning, i.tags,
-            c.id AS card_id
-        FROM cards c
-        JOIN items i ON i.id = c.item_id
-        JOIN sentences s ON s.item_id = c.item_id
-        WHERE c.due_date <= ?
-        ORDER BY c.due_date ASC
-        """,
-        (today_date_str(),),
-        "due",
-        want_due,
-    )
+        dparams: List[Any] = [today_date_str()]
+        dq, dparams = _apply_tag_filter_sql(dq, dparams, tag_filter, level_filter)
+        dq += " ORDER BY c.due_date ASC"
+        fetch(dq, dparams, "due", want_due if not only_due else total)
 
-    fetch(
+    if not only_mistake and not only_due:
+        nq = """
+            SELECT
+                s.id AS sentence_id, s.sentence, s.cloze, s.answer,
+                i.id AS item_id, i.item_type, i.term, i.reading, i.meaning, i.tags,
+                c.id AS card_id
+            FROM sentences s
+            JOIN items i ON i.id = s.item_id
+            LEFT JOIN cards c ON c.item_id = i.id
+            WHERE 1=1
         """
-        SELECT
-            s.id AS sentence_id, s.sentence, s.cloze, s.answer,
-            i.id AS item_id, i.item_type, i.term, i.reading, i.meaning, i.tags,
-            c.id AS card_id
-        FROM sentences s
-        JOIN items i ON i.id = s.item_id
-        LEFT JOIN cards c ON c.item_id = i.id
-        ORDER BY s.id DESC
-        """,
-        tuple(),
-        "new",
-        want_new,
-    )
+        nparams: List[Any] = []
+        nq, nparams = _apply_tag_filter_sql(nq, nparams, tag_filter, level_filter)
+        nq += " ORDER BY s.id DESC"
+        fetch(nq, nparams, "new", want_new)
 
     if updates:
         db.executemany(

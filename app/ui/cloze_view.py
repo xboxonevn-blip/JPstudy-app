@@ -14,7 +14,14 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 
-from app.db.repo import get_cloze_queue, record_attempt, record_mistake, resolve_mistake
+from app.db.repo import (
+    get_cloze_queue,
+    record_attempt,
+    record_mistake,
+    resolve_mistake,
+    record_error,
+    resolve_errors_for_item,
+)
 
 
 class ClozePracticeView(QWidget):
@@ -179,12 +186,20 @@ class ClozePracticeView(QWidget):
                 card_id=None,
                 last_attempt_id=attempt_id,
             )
+            record_error(
+                self.db,
+                item_id=int(item_id),
+                source="C",
+                error_type="cloze_wrong",
+                note=f"expected={expected}; response={response}",
+            )
         elif is_correct and item_id is not None:
             resolve_mistake(
                 self.db,
                 item_id=int(item_id),
                 source="sentence",
             )
+            resolve_errors_for_item(self.db, item_id=int(item_id), source="C")
 
         if is_correct:
             self.lbl_feedback.setStyleSheet("color:#006400;")
