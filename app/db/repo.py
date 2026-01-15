@@ -4,6 +4,67 @@ import sqlite3
 from typing import List, Optional, Dict, Any, Iterable, Tuple
 from app.core.time_utils import today_date_str, now_iso, add_days
 
+def _normalize_key(term: str, reading: str) -> Tuple[str, str]:
+    return term.strip(), (reading or "").strip()
+
+
+def _merge_tags(existing: str, new: str) -> str:
+    parts: List[str] = []
+    seen = set()
+    for raw in (existing or "").split(",") + (new or "").split(","):
+        tag = raw.strip()
+        if not tag:
+            continue
+        key = tag.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        parts.append(tag)
+    return ", ".join(parts)
+
+
+def _find_item_by_term_reading(db: sqlite3.Connection, term: str, reading: str) -> Optional[sqlite3.Row]:
+    term_key, reading_key = _normalize_key(term, reading)
+    cur = db.execute(
+        """
+        SELECT *
+        FROM items
+        WHERE lower(term)=lower(?) AND lower(COALESCE(reading,''))=lower(?)
+        LIMIT 1
+        """,
+        (term_key, reading_key),
+    )
+    return cur.fetchone()
+
+
+def _ensure_card_for_item(db: sqlite3.Connection, item_id: int) -> None:
+    cur = db.execute("SELECT id FROM cards WHERE item_id=? LIMIT 1", (item_id,))
+    if cur.fetchone() is None:
+        db.execute(
+            """INSERT INTO cards(item_id, due_date, interval_days, ease, lapses, last_grade, is_leech, created_at, updated_at)
+                 VALUES(?,?,?,?,?,?,?,?,?)""",
+            (item_id, today_date_str(), 0, 2.2, 0, None, 0, now_iso(), now_iso()),
+        )
+
+
+def _ensure_sentence_for_item(db: sqlite3.Connection, item_id: int, sentence: str, answer: str) -> None:
+    sentence = sentence.strip()
+    if not sentence:
+        return
+    cur = db.execute(
+        "SELECT 1 FROM sentences WHERE item_id=? AND sentence=? LIMIT 1",
+        (item_id, sentence),
+    )
+    if cur.fetchone() is not None:
+        return
+    cloze, ans = build_cloze(sentence, answer)
+    db.execute(
+        """INSERT INTO sentences(item_id, sentence, cloze, answer, kind, created_at)
+             VALUES(?,?,?,?,?,?)""",
+        (item_id, sentence, cloze, ans, "example", now_iso()),
+    )
+
+
 def create_item_with_card(
     db: sqlite3.Connection,
     item_type: str,
@@ -12,7 +73,34 @@ def create_item_with_card(
     meaning: str,
     example: str = "",
     tags: str = ""
-) -> int:
+) -> Tuple[int, bool]:
+    term = term.strip()
+    reading = (reading or "").strip()
+    meaning = meaning.strip()
+    example = (example or "").strip()
+    tags = (tags or "").strip()
+
+    # Dedupe by term + reading
+    existing = _find_item_by_term_reading(db, term, reading)
+    if existing:
+        item_id = int(existing["id"])
+        merged_tags = _merge_tags(existing.get("tags") or "", tags)
+        updates = {}
+        if merged_tags != (existing.get("tags") or ""):
+            updates["tags"] = merged_tags
+        if example and not (existing.get("example") or "").strip():
+            updates["example"] = example
+        if meaning and not (existing.get("meaning") or "").strip():
+            updates["meaning"] = meaning
+        if updates:
+            sets = ", ".join(f"{k}=?" for k in updates.keys())
+            db.execute(f"UPDATE items SET {sets} WHERE id=?", (*updates.values(), item_id))
+        if example:
+            _ensure_sentence_for_item(db, item_id=item_id, sentence=example, answer=term)
+        _ensure_card_for_item(db, item_id)
+        db.commit()
+        return item_id, False
+
     cur = db.cursor()
     cur.execute(
         """INSERT INTO items(item_type, term, reading, meaning, example, tags, created_at)
@@ -38,7 +126,7 @@ def create_item_with_card(
         )
 
     db.commit()
-    return int(item_id)
+    return int(item_id), True
 
 
 _JP_TOKEN = re.compile(r"[\u3400-\u9FFF\u3040-\u30FF\u3005\u30FC]+")
@@ -67,6 +155,16 @@ def build_cloze(sentence: str, answer: str) -> Tuple[str, str]:
         return (sentence.replace(target, placeholder, 1), ans or target)
 
     return (placeholder, ans)
+
+
+def _tag_tokens(tags: str) -> List[str]:
+    parts = re.split(r"[,\s/|]+", tags or "")
+    cleaned = []
+    for p in parts:
+        token = p.strip().strip("#[]()")
+        if token:
+            cleaned.append(token)
+    return cleaned
 
 def count_due_cards(db: sqlite3.Connection, date_str: Optional[str] = None) -> int:
     date_str = date_str or today_date_str()
@@ -198,6 +296,40 @@ def record_mistake(
     return mistake_id
 
 
+def resolve_mistake(
+    db: sqlite3.Connection,
+    item_id: int,
+    source: str,
+    reduce_by: int = 1,
+    commit: bool = True
+) -> bool:
+    """
+    Decrease mistake count for an item/source. Deletes row when it reaches zero.
+    """
+    cur = db.execute(
+        "SELECT id, mistake_count FROM mistakes WHERE item_id=? AND source=?",
+        (item_id, source),
+    )
+    row = cur.fetchone()
+    if row is None:
+        return False
+
+    current = int(row["mistake_count"] or 0)
+    new_count = max(0, current - max(1, reduce_by))
+    mistake_id = int(row["id"])
+    if new_count <= 0:
+        db.execute("DELETE FROM mistakes WHERE id=?", (mistake_id,))
+    else:
+        db.execute(
+            "UPDATE mistakes SET mistake_count=?, last_mistake_at=? WHERE id=?",
+            (new_count, now_iso(), mistake_id),
+        )
+
+    if commit:
+        db.commit()
+    return True
+
+
 def log_review(
     db: sqlite3.Connection,
     card_id: int,
@@ -226,15 +358,24 @@ def log_review(
         commit=False,
     )
 
-    if (item_id is not None) and not is_correct:
-        record_mistake(
-            db,
-            item_id=item_id,
-            source="srs",
-            card_id=card_id,
-            last_attempt_id=attempt_id,
-            commit=False,
-        )
+    if item_id is not None:
+        if not is_correct:
+            record_mistake(
+                db,
+                item_id=item_id,
+                source="srs",
+                card_id=card_id,
+                last_attempt_id=attempt_id,
+                commit=False,
+            )
+        else:
+            resolve_mistake(
+                db,
+                item_id=item_id,
+                source="srs",
+                reduce_by=1,
+                commit=False,
+            )
 
     db.commit()
 
@@ -331,9 +472,11 @@ def get_level_breakdown(db: sqlite3.Connection, due_only: bool = True) -> Dict[s
         )
         rows = cur.fetchall()
     for row in rows:
-        tags = (row["tags"] or "")
+        tag_set = {t.lower() for t in _tag_tokens(row["tags"] or "")}
+        if not tag_set:
+            continue
         for lvl in levels:
-            if lvl.lower() in tags.lower():
+            if lvl.lower() in tag_set:
                 counts[lvl] += 1
     return counts
 

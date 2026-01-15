@@ -4,7 +4,7 @@ import csv
 import os
 import random
 from typing import Callable, Optional, List
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QPushButton, QFileDialog, QHBoxLayout,
@@ -17,10 +17,12 @@ from app.db.repo import create_item_with_card, count_items, get_items_by_ids
 
 @dataclass
 class ImportResult:
-    imported: int
-    errors: int
-    new_ids: List[int]
-    error_rows: List[str]
+    imported: int = 0
+    errors: int = 0
+    skipped: int = 0  # duplicates merged/skipped
+    new_ids: List[int] = field(default_factory=list)
+    error_rows: List[str] = field(default_factory=list)
+    duplicate_rows: List[str] = field(default_factory=list)
 
 
 class AddItemDialog(QDialog):
@@ -247,7 +249,7 @@ class ImportView(QWidget):
             if not data["term"] or not data["meaning"]:
                 QMessageBox.warning(self, "Thieu thong tin", "Can nhap toi thieu: term + meaning.")
                 return
-            create_item_with_card(
+            _, created = create_item_with_card(
                 self.db,
                 item_type=data["item_type"],
                 term=data["term"],
@@ -257,7 +259,14 @@ class ImportView(QWidget):
                 tags=data["tags"],
             )
             self.refresh()
-            QMessageBox.information(self, "OK", "Da them muc va tao the SRS (den han hom nay).")
+            if created:
+                QMessageBox.information(self, "OK", "Da them muc va tao the SRS (den han hom nay).")
+            else:
+                QMessageBox.information(
+                    self,
+                    "Da ton tai",
+                    "Term + reading da ton tai, da merge tags/example va giu the cu (den han hom nay).",
+                )
 
     def _merge_tags(self, tags: str, level_tag: Optional[str]) -> str:
         tags = tags or ""
@@ -330,7 +339,9 @@ class ImportView(QWidget):
     def _import_csv(self, path: str, level_tag: Optional[str] = None) -> ImportResult:
         imported = 0
         errors = 0
+        skipped = 0
         error_rows: List[str] = []
+        duplicate_rows: List[str] = []
         new_ids: List[int] = []
 
         with open(path, "r", encoding="utf-8-sig", newline="") as f:
@@ -344,7 +355,7 @@ class ImportView(QWidget):
             for row_num, row in enumerate(reader, start=2):
                 try:
                     data = self._map_row(row, level_tag=level_tag)
-                    new_id = create_item_with_card(
+                    new_id, created = create_item_with_card(
                         self.db,
                         item_type=data["item_type"],
                         term=data["term"],
@@ -353,14 +364,25 @@ class ImportView(QWidget):
                         example=data["example"],
                         tags=data["tags"],
                     )
-                    new_ids.append(new_id)
-                    imported += 1
+                    if created:
+                        new_ids.append(new_id)
+                        imported += 1
+                    else:
+                        skipped += 1
+                        duplicate_rows.append(f"Row {row_num}: trung term+reading (id={new_id})")
                 except Exception as e:
                     errors += 1
                     msg = str(e).strip() or e.__class__.__name__
                     error_rows.append(f"Row {row_num}: {msg}")
 
-        return ImportResult(imported=imported, errors=errors, new_ids=new_ids, error_rows=error_rows)
+        return ImportResult(
+            imported=imported,
+            errors=errors,
+            skipped=skipped,
+            new_ids=new_ids,
+            error_rows=error_rows,
+            duplicate_rows=duplicate_rows,
+        )
 
     def on_auto_import(self):
         level = (self.cb_level.currentText() or "").strip().upper()
@@ -372,7 +394,9 @@ class ImportView(QWidget):
         missing = []
         total_imported = 0
         total_errors = 0
+        total_skipped = 0
         error_rows_all: List[str] = []
+        duplicate_rows_all: List[str] = []
         new_ids: List[int] = []
 
         for lvl in levels:
@@ -387,7 +411,9 @@ class ImportView(QWidget):
                 return
             total_imported += result.imported
             total_errors += result.errors
+            total_skipped += result.skipped
             error_rows_all.extend([f"{lvl} - {msg}" for msg in result.error_rows])
+            duplicate_rows_all.extend([f"{lvl} - {msg}" for msg in result.duplicate_rows])
             new_ids.extend(result.new_ids)
 
         if total_imported == 0 and total_errors == 0 and missing:
@@ -399,7 +425,11 @@ class ImportView(QWidget):
             return
 
         self.refresh()
-        msg = f"Imported: {total_imported} rows. Errors: {total_errors} rows."
+        msg = (
+            f"Imported: {total_imported} rows. "
+            f"Duplicates merged/skipped: {total_skipped}. "
+            f"Errors: {total_errors} rows."
+        )
         if missing:
             msg += " Missing files for: " + ", ".join(missing) + "."
         if total_errors and error_rows_all:
@@ -407,6 +437,11 @@ class ImportView(QWidget):
             if total_errors > len(error_rows_all):
                 preview += "\n..."
             msg += "\nError rows (preview):\n" + preview
+        if total_skipped and duplicate_rows_all:
+            preview_dup = "\n".join(duplicate_rows_all[:8])
+            if total_skipped > len(duplicate_rows_all):
+                preview_dup += "\n..."
+            msg += "\nDuplicates (preview):\n" + preview_dup
         QMessageBox.information(self, "Auto import done", msg)
         self._launch_quiz_with_ids(new_ids)
 
@@ -424,12 +459,21 @@ class ImportView(QWidget):
             return
 
         self.refresh()
-        msg = f"Da import: {result.imported} dong. Loi: {result.errors} dong."
+        msg = (
+            f"Da import: {result.imported} dong. "
+            f"Trung (merge/skip): {result.skipped} dong. "
+            f"Loi: {result.errors} dong."
+        )
         if result.errors and result.error_rows:
             preview = "\n".join(result.error_rows[:8])
             if result.errors > len(result.error_rows):
                 preview += "\n..."
             msg += "\nError rows (preview):\n" + preview
+        if result.skipped and result.duplicate_rows:
+            preview_dup = "\n".join(result.duplicate_rows[:8])
+            if result.skipped > len(result.duplicate_rows):
+                preview_dup += "\n..."
+            msg += "\nDuplicates (preview):\n" + preview_dup
         QMessageBox.information(self, "Import xong", msg)
         self._launch_quiz_with_ids(result.new_ids)
 

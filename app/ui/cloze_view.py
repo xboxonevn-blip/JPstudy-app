@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt
 
-from app.db.repo import get_cloze_queue, record_attempt, record_mistake
+from app.db.repo import get_cloze_queue, record_attempt, record_mistake, resolve_mistake
 
 
 class ClozePracticeView(QWidget):
@@ -143,13 +143,20 @@ class ClozePracticeView(QWidget):
             is_correct=is_correct,
         )
 
-        if not is_correct and self.current.get("item_id") is not None:
+        item_id = self.current.get("item_id")
+        if not is_correct and item_id is not None:
             record_mistake(
                 self.db,
-                item_id=int(self.current["item_id"]),
+                item_id=int(item_id),
                 source="sentence",
                 card_id=None,
                 last_attempt_id=attempt_id,
+            )
+        elif is_correct and item_id is not None:
+            resolve_mistake(
+                self.db,
+                item_id=int(item_id),
+                source="sentence",
             )
 
         if is_correct:

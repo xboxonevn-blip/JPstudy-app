@@ -169,4 +169,17 @@ class SrsReviewView(QWidget):
             expected=self.current["meaning"] or "",
             response=grade,
         )
+        if grade == "again":
+            retry = dict(self.current)
+            retry.update(
+                {
+                    "due_date": new_state.due_date,
+                    "interval_days": new_state.interval_days,
+                    "ease": new_state.ease,
+                    "lapses": new_state.lapses,
+                    "is_leech": new_state.is_leech,
+                }
+            )
+            insert_at = 2 if len(self.queue) >= 2 else len(self.queue)
+            self.queue.insert(insert_at, retry)
         self._next_card()

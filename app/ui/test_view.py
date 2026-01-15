@@ -17,6 +17,7 @@ from app.db.repo import (
     get_test_batch,
     record_attempt,
     record_mistake,
+    resolve_mistake,
     get_or_create_test,
     create_test_attempt,
     update_test_attempt,
@@ -157,6 +158,7 @@ class MiniTestView(QWidget):
         response = self.ed_answer.text().strip()
         expected = (q.get("answer") or q.get("term") or "").strip()
         is_correct = response.lower() == expected.lower() if expected else False
+        item_id = q.get("item_id")
 
         attempt_id = record_attempt(
             self.db,
@@ -172,13 +174,19 @@ class MiniTestView(QWidget):
             is_correct=is_correct,
         )
 
-        if not is_correct and q.get("item_id") is not None:
+        if not is_correct and item_id is not None:
             record_mistake(
                 self.db,
-                item_id=int(q["item_id"]),
+                item_id=int(item_id),
                 source="test",
                 card_id=q.get("card_id"),
                 last_attempt_id=attempt_id,
+            )
+        elif is_correct and item_id is not None:
+            resolve_mistake(
+                self.db,
+                item_id=int(item_id),
+                source="test",
             )
 
         if is_correct:
