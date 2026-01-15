@@ -7,6 +7,7 @@ from PySide6.QtCore import Qt
 from app.db.repo import (
     count_due_cards,
     count_items,
+    get_attempt_stats,
     get_review_stats,
     get_streak,
     get_leech_due_count,
@@ -73,17 +74,37 @@ class HomeView(QWidget):
         items = count_items(self.db)
         self.stats.setText(f"Tong muc da nap: {items} | The den han hom nay: {due}")
 
+        activity = get_attempt_stats(self.db)
         review = get_review_stats(self.db)
         streak = get_streak(self.db)
         daily_goal = 30
+        source_parts = []
+        labels = {
+            "srs": "B/SRS",
+            "sentence": "C/Cloze",
+            "test": "D/Test",
+            "quiz": "Quiz",
+            "manual": "Manual",
+        }
+        for src, lbl in labels.items():
+            data = activity["by_source"].get(src)
+            if data:
+                source_parts.append(f"{lbl}: {data['total']} ({data['accuracy']:.0f}% dA­ng)")
+        extra_sources = [k for k in activity["by_source"].keys() if k not in labels]
+        for src in extra_sources:
+            data = activity["by_source"][src]
+            source_parts.append(f"{src}: {data['total']} ({data['accuracy']:.0f}% dA­ng)")
+        source_text = " | ".join(source_parts) if source_parts else "Ch’øa co hoat dA§ng"
         self.review_stats.setText(
-            f"Hom nay: {review['total']} review | Dung: {review['correct']} "
-            f"| Accuracy: {review['accuracy']:.1f}% | Streak: {streak} ngay | Goal: {daily_goal}/day"
+            f"Hoat dA§ng hom nay: {activity['total']} | Acc: {activity['accuracy']:.1f}% "
+            f"| {source_text} | Streak: {streak} ngay | Goal: {daily_goal}/day"
         )
 
         level_counts = get_level_breakdown(self.db, due_only=True)
         leech_due = get_leech_due_count(self.db)
         level_text = " | ".join([f"{lvl}: {level_counts[lvl]}" for lvl in ["N5", "N4", "N3", "N2", "N1"]])
-        self.level_stats.setText(f"Leech due: {leech_due} | Due by level: {level_text}")
+        self.level_stats.setText(
+            f"Leech due: {leech_due} | Due by level: {level_text} | SRS: {review['total']} ({review['accuracy']:.1f}% acc)"
+        )
 
         self.btn_start_srs.setEnabled(due > 0)

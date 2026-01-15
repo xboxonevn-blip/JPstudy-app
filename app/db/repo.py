@@ -1,4 +1,5 @@
 from __future__ import annotations
+import re
 import sqlite3
 from typing import List, Optional, Dict, Any, Iterable, Tuple
 from app.core.time_utils import today_date_str, now_iso, add_days
@@ -40,20 +41,31 @@ def create_item_with_card(
     return int(item_id)
 
 
+_JP_TOKEN = re.compile(r"[\u3400-\u9FFF\u3040-\u30FF\u3005\u30FC]+")
+
+
 def build_cloze(sentence: str, answer: str) -> Tuple[str, str]:
     """
-    Create a simple cloze by replacing the first occurrence of the answer with ____.
-    If the answer is not found, blank out the first token as a fallback.
+    Create a cloze by replacing the first occurrence of the answer (if present),
+    otherwise blank the first Japanese token (kanji/kana). As a last resort,
+    blank the first couple of characters.
     """
     placeholder = "____"
     sentence = sentence or ""
     ans = (answer or "").strip()
     if ans and ans in sentence:
         return (sentence.replace(ans, placeholder, 1), ans)
-    parts = sentence.split()
-    if parts:
-        parts[0] = placeholder
-        return (" ".join(parts), ans)
+
+    m = _JP_TOKEN.search(sentence)
+    if m:
+        target = m.group(0)
+        return (sentence.replace(target, placeholder, 1), ans or target)
+
+    stripped = sentence.strip()
+    if stripped:
+        target = stripped[:2] if len(stripped) > 1 else stripped
+        return (sentence.replace(target, placeholder, 1), ans or target)
+
     return (placeholder, ans)
 
 def count_due_cards(db: sqlite3.Connection, date_str: Optional[str] = None) -> int:
@@ -242,14 +254,58 @@ def get_review_stats(db: sqlite3.Connection, date_str: Optional[str] = None) -> 
     return {"date": date_str, "total": total, "correct": correct, "accuracy": accuracy}
 
 
+def get_attempt_stats(db: sqlite3.Connection, date_str: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Aggregate attempts (SRS, cloze, test, etc.) for a day to surface holistic activity.
+    """
+    date_str = date_str or today_date_str()
+    cur = db.execute(
+        """
+        SELECT source, COUNT(*) AS total, SUM(is_correct) AS correct
+        FROM attempts
+        WHERE substr(created_at,1,10)=? AND is_correct IS NOT NULL
+        GROUP BY source
+        """,
+        (date_str,),
+    )
+    by_source: Dict[str, Dict[str, Any]] = {}
+    total = 0
+    correct = 0
+    for row in cur.fetchall():
+        src = row["source"]
+        t = int(row["total"] or 0)
+        c = int(row["correct"] or 0)
+        by_source[src] = {
+            "total": t,
+            "correct": c,
+            "accuracy": (c / t * 100) if t else 0.0,
+        }
+        total += t
+        correct += c
+
+    accuracy = (correct / total * 100) if total > 0 else 0.0
+    return {"date": date_str, "total": total, "correct": correct, "accuracy": accuracy, "by_source": by_source}
+
+
 def get_streak(db: sqlite3.Connection, max_days: int = 60) -> int:
-    # Count consecutive days (including today) with at least one review log
+    """
+    Count consecutive days (including today) with at least one activity
+    (SRS review log or any attempt).
+    """
     streak = 0
     today = today_date_str()
     cur_date = today
     for _ in range(max_days):
         cur = db.execute(
-            "SELECT 1 FROM review_logs WHERE substr(created_at,1,10)=? LIMIT 1",
+            """
+            SELECT 1 FROM (
+                SELECT created_at FROM review_logs
+                UNION ALL
+                SELECT created_at FROM attempts
+            )
+            WHERE substr(created_at,1,10)=?
+            LIMIT 1
+            """,
             (cur_date,),
         )
         if cur.fetchone() is None:

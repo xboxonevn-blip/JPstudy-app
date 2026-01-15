@@ -4,6 +4,7 @@ import csv
 import os
 import random
 from typing import Callable, Optional, List
+from dataclasses import dataclass
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QPushButton, QFileDialog, QHBoxLayout,
@@ -12,6 +13,14 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt
 
 from app.db.repo import create_item_with_card, count_items, get_items_by_ids
+
+
+@dataclass
+class ImportResult:
+    imported: int
+    errors: int
+    new_ids: List[int]
+    error_rows: List[str]
 
 
 class AddItemDialog(QDialog):
@@ -318,9 +327,10 @@ class ImportView(QWidget):
             "tags": tags,
         }
 
-    def _import_csv(self, path: str, level_tag: Optional[str] = None) -> tuple[int, int, List[int]]:
+    def _import_csv(self, path: str, level_tag: Optional[str] = None) -> ImportResult:
         imported = 0
         errors = 0
+        error_rows: List[str] = []
         new_ids: List[int] = []
 
         with open(path, "r", encoding="utf-8-sig", newline="") as f:
@@ -331,7 +341,7 @@ class ImportView(QWidget):
             if reader.fieldnames is None:
                 raise ValueError("CSV missing header.")
 
-            for _, row in enumerate(reader, start=2):
+            for row_num, row in enumerate(reader, start=2):
                 try:
                     data = self._map_row(row, level_tag=level_tag)
                     new_id = create_item_with_card(
@@ -345,10 +355,12 @@ class ImportView(QWidget):
                     )
                     new_ids.append(new_id)
                     imported += 1
-                except Exception:
+                except Exception as e:
                     errors += 1
+                    msg = str(e).strip() or e.__class__.__name__
+                    error_rows.append(f"Row {row_num}: {msg}")
 
-        return imported, errors, new_ids
+        return ImportResult(imported=imported, errors=errors, new_ids=new_ids, error_rows=error_rows)
 
     def on_auto_import(self):
         level = (self.cb_level.currentText() or "").strip().upper()
@@ -360,6 +372,7 @@ class ImportView(QWidget):
         missing = []
         total_imported = 0
         total_errors = 0
+        error_rows_all: List[str] = []
         new_ids: List[int] = []
 
         for lvl in levels:
@@ -368,13 +381,14 @@ class ImportView(QWidget):
                 missing.append(lvl)
                 continue
             try:
-                imported, errors, ids = self._import_csv(path, level_tag=lvl)
+                result = self._import_csv(path, level_tag=lvl)
             except Exception as e:
                 QMessageBox.critical(self, "Import error", f"{lvl}: {e}")
                 return
-            total_imported += imported
-            total_errors += errors
-            new_ids.extend(ids)
+            total_imported += result.imported
+            total_errors += result.errors
+            error_rows_all.extend([f"{lvl} - {msg}" for msg in result.error_rows])
+            new_ids.extend(result.new_ids)
 
         if total_imported == 0 and total_errors == 0 and missing:
             QMessageBox.warning(
@@ -388,6 +402,11 @@ class ImportView(QWidget):
         msg = f"Imported: {total_imported} rows. Errors: {total_errors} rows."
         if missing:
             msg += " Missing files for: " + ", ".join(missing) + "."
+        if total_errors and error_rows_all:
+            preview = "\n".join(error_rows_all[:8])
+            if total_errors > len(error_rows_all):
+                preview += "\n..."
+            msg += "\nError rows (preview):\n" + preview
         QMessageBox.information(self, "Auto import done", msg)
         self._launch_quiz_with_ids(new_ids)
 
@@ -399,14 +418,20 @@ class ImportView(QWidget):
             return
 
         try:
-            imported, errors, new_ids = self._import_csv(path)
+            result = self._import_csv(path)
         except Exception as e:
             QMessageBox.critical(self, "Import loi", str(e))
             return
 
         self.refresh()
-        QMessageBox.information(self, "Import xong", f"Da import: {imported} dong. Loi: {errors} dong.")
-        self._launch_quiz_with_ids(new_ids)
+        msg = f"Da import: {result.imported} dong. Loi: {result.errors} dong."
+        if result.errors and result.error_rows:
+            preview = "\n".join(result.error_rows[:8])
+            if result.errors > len(result.error_rows):
+                preview += "\n..."
+            msg += "\nError rows (preview):\n" + preview
+        QMessageBox.information(self, "Import xong", msg)
+        self._launch_quiz_with_ids(result.new_ids)
 
     def _launch_quiz_with_ids(self, ids: List[int]) -> None:
         if not ids:
