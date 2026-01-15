@@ -1,0 +1,23 @@
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Local databases / state
+app_data/*.db
+app_data/*.sqlite
+app_data/*.sqlite3
+app_data/*.db-shm
+app_data/*.db-wal
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

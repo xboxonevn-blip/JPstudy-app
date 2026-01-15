@@ -7,9 +7,8 @@ Trong bản template này, bạn có sẵn:
 - DB SQLite + tạo bảng tự động khi chạy lần đầu
 - Màn **Home** (Daily Plan: đếm thẻ due)
 - Màn **Nạp**: Import CSV + thêm mục thủ công
-- Màn **SRS Review**: review thẻ đến hạn, chấm Again/Hard/Good/Easy (SM-2 rút gọn)
-
-> Các phần (C) và (D) được để sẵn “khung/placeholder” để bạn mở rộng tiếp.
+ - Màn **SRS Review**: review thẻ đến hạn, chấm Again/Hard/Good/Easy (SM-2 rút gọn)
+ - Màn **C - Luyện câu** và **D - Mini test**: MVP đã sẵn sàng (cloze + test trộn due/mới/lỗi).
 
 ---
 
@@ -80,16 +79,32 @@ DB mặc định: `app_data/app.db` (nằm cạnh file `main.py`).
 
 Chúc bạn build app vui vẻ!
 
-## 6) Auto Import (JLPT N5-N1)
+---
+
+## Release / CI
+- Version: v0.1.0 (xem `CHANGELOG.md`).
+- CI: GitHub Actions (`.github/workflows/ci.yml`) compile + import-smoke để tránh gãy khi thêm C/D.
+
+## 6) Cloze Practice (C - Dùng được trong câu)
+- Tab **C — Luyện câu**: luyện điền từ vào chỗ trống từ cột `example`.
+- Đáp án đúng/sai được lưu vào `attempts`; sai thì đẩy vào `mistakes` (sổ lỗi) để ưu tiên ôn lại.
+- Ưu tiên hiển thị các câu đang nằm trong sổ lỗi (nguồn `sentence`).
+
+## 7) Mini Test (D - Thi thử & sửa lỗi)
+- Tab **D — Thi thử**: 10-20 câu cloze, trộn 3 nhóm: lỗi (sổ lỗi), thẻ đến hạn (due), câu mới.
+- Mỗi câu chấm đúng/sai, log vào `attempts`; sai sẽ đẩy `mistakes` (nguồn `test`) để quay lại B/C ôn lại.
+- Mỗi lần chạy tạo một test attempt, tính điểm %, xem tổng đúng/sai.
+
+## 8) Auto Import (JLPT N5-N1)
 Put CSV files in `data/` named `n5.csv`, `n4.csv`, `n3.csv`, `n2.csv`, `n1.csv`
 or `jlpt_n5.csv` ... `jlpt_n1.csv`. The Auto Import button will tag items with
 `N5`..`N1` automatically. If `n4.csv` is missing, `n4_sample.csv` is used.
 
-## 7) New study helpers
+## 9) New study helpers
 - Leech filtered deck: trong SRS, bật `Leech only` để ôn riêng thẻ sai nhiều.
 - Quick Quiz sau import: sau khi import, app hỏi nhanh 10 thẻ mới để active recall.
 - Dashboard: Home hiển thị số review hôm nay, accuracy, streak và đếm leech/due theo level.
 
-## 8) Import từ Anki CSV
+## 10) Import từ Anki CSV
 - Xuất deck Anki ra CSV/TXT (có header) với các cột phổ biến: `Front`/`Back`/`Tags` (hoặc `Expression`/`Reading`/`Meaning`/`Sentence`). App tự map: Front→term, Back→meaning, Reading→reading, Sentence→example, Tags→tags. Nếu không có `item_type`, mặc định dùng `vocab`.
 - Hỗ trợ cả dấu phẩy hoặc tab phân tách (auto detect). Sau khi import vẫn tạo thẻ SRS đến hạn ngay.

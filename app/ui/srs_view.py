@@ -159,5 +159,14 @@ class SrsReviewView(QWidget):
             last_grade=grade,
             is_leech=new_state.is_leech,
         )
-        log_review(self.db, card_id=int(self.current["id"]), grade=grade, is_correct=(grade != "again"))
+        log_review(
+            self.db,
+            card_id=int(self.current["id"]),
+            grade=grade,
+            is_correct=(grade != "again"),
+            item_id=int(self.current["item_id"]),
+            prompt=self.front.text(),
+            expected=self.current["meaning"] or "",
+            response=grade,
+        )
         self._next_card()
