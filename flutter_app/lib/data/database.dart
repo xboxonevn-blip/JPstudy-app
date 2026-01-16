@@ -9,9 +9,13 @@ import 'package:path_provider/path_provider.dart';
 
 part 'database.g.dart';
 
+const _itemTypeCheck = "item_type IN ('vocab','kanji','grammar')";
+const _errorSourceCheck = "source IN ('C','D')";
+const _attemptSourceCheck = "source IN ('srs','sentence','test','quiz','manual')";
+
 class Items extends Table {
   IntColumn get id => integer().autoIncrement()();
-  TextColumn get itemType => text().check(itemType.isIn(const ['vocab', 'kanji', 'grammar']))();
+  TextColumn get itemType => text().check(const CustomExpression(_itemTypeCheck))();
   TextColumn get term => text()();
   TextColumn get reading => text().nullable()();
   TextColumn get meaning => text()();
@@ -46,7 +50,7 @@ class Sentences extends Table {
 class Errors extends Table {
   IntColumn get id => integer().autoIncrement()();
   IntColumn get itemId => integer().nullable().references(Items, #id)();
-  TextColumn get source => text().check(source.isIn(const ['C', 'D']))();
+  TextColumn get source => text().check(const CustomExpression(_errorSourceCheck))();
   TextColumn get errorType => text()();
   TextColumn get note => text().nullable()();
   TextColumn get createdAt => text()();
@@ -82,7 +86,7 @@ class Attempts extends Table {
   IntColumn get sentenceId => integer().nullable().references(Sentences, #id)();
   IntColumn get testId => integer().nullable().references(Tests, #id)();
   IntColumn get testAttemptId => integer().nullable().references(TestAttempts, #id)();
-  TextColumn get source => text().check(source.isIn(const ['srs', 'sentence', 'test', 'quiz', 'manual']))();
+  TextColumn get source => text().check(const CustomExpression(_attemptSourceCheck))();
   TextColumn get prompt => text().nullable()();
   TextColumn get response => text().nullable()();
   TextColumn get expected => text().nullable()();
@@ -96,7 +100,7 @@ class Mistakes extends Table {
   IntColumn get id => integer().autoIncrement()();
   IntColumn get itemId => integer().references(Items, #id)();
   IntColumn get cardId => integer().nullable().references(Cards, #id)();
-  TextColumn get source => text().check(source.isIn(const ['srs', 'sentence', 'test', 'quiz', 'manual']))();
+  TextColumn get source => text().check(const CustomExpression(_attemptSourceCheck))();
   IntColumn get mistakeCount => integer().withDefault(const Constant(1))();
   TextColumn get lastMistakeAt => text()();
   IntColumn get lastAttemptId => integer().nullable().references(Attempts, #id)();
@@ -159,7 +163,7 @@ LazyDatabase _openConnection() {
       return WebDatabase(
         'jpstudy.db',
         setup: (db) {
-          db.execute('PRAGMA foreign_keys = ON');
+          db.run('PRAGMA foreign_keys = ON');
         },
       );
     }

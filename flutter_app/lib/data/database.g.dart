@@ -22,7 +22,7 @@ class $ItemsTable extends Items with TableInfo<$ItemsTable, Item> {
   @override
   late final GeneratedColumn<String> itemType = GeneratedColumn<String>(
       'item_type', aliasedName, false,
-      check: () => itemType.isIn(const ['vocab', 'kanji', 'grammar']),
+      check: () => const CustomExpression(_itemTypeCheck),
       type: DriftSqlType.string,
       requiredDuringInsert: true);
   static const VerificationMeta _termMeta = const VerificationMeta('term');
@@ -1307,7 +1307,7 @@ class $ErrorsTable extends Errors with TableInfo<$ErrorsTable, Error> {
   @override
   late final GeneratedColumn<String> source = GeneratedColumn<String>(
       'source', aliasedName, false,
-      check: () => source.isIn(const ['C', 'D']),
+      check: () => const CustomExpression(_errorSourceCheck),
       type: DriftSqlType.string,
       requiredDuringInsert: true);
   static const VerificationMeta _errorTypeMeta =
@@ -2530,8 +2530,7 @@ class $AttemptsTable extends Attempts with TableInfo<$AttemptsTable, Attempt> {
   @override
   late final GeneratedColumn<String> source = GeneratedColumn<String>(
       'source', aliasedName, false,
-      check: () =>
-          source.isIn(const ['srs', 'sentence', 'test', 'quiz', 'manual']),
+      check: () => const CustomExpression(_attemptSourceCheck),
       type: DriftSqlType.string,
       requiredDuringInsert: true);
   static const VerificationMeta _promptMeta = const VerificationMeta('prompt');
@@ -3192,8 +3191,7 @@ class $MistakesTable extends Mistakes with TableInfo<$MistakesTable, Mistake> {
   @override
   late final GeneratedColumn<String> source = GeneratedColumn<String>(
       'source', aliasedName, false,
-      check: () =>
-          source.isIn(const ['srs', 'sentence', 'test', 'quiz', 'manual']),
+      check: () => const CustomExpression(_attemptSourceCheck),
       type: DriftSqlType.string,
       requiredDuringInsert: true);
   static const VerificationMeta _mistakeCountMeta =
