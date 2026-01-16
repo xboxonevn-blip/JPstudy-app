@@ -1,11 +1,6 @@
-import 'dart:io';
-
 import 'package:drift/drift.dart';
-import 'package:drift/native.dart';
-import 'package:drift/web.dart';
-import 'package:flutter/foundation.dart';
-import 'package:path/path.dart' as p;
-import 'package:path_provider/path_provider.dart';
+
+import 'database_connection.dart';
 
 part 'database.g.dart';
 
@@ -136,6 +131,9 @@ class JPStudyDatabase extends _$JPStudyDatabase {
           await m.createAll();
           await _createIndexes();
         },
+        beforeOpen: (details) async {
+          await customStatement('PRAGMA foreign_keys = ON');
+        },
       );
 
   Future<void> _createIndexes() async {
@@ -158,23 +156,5 @@ class JPStudyDatabase extends _$JPStudyDatabase {
 }
 
 LazyDatabase _openConnection() {
-  return LazyDatabase(() async {
-    if (kIsWeb) {
-      return WebDatabase(
-        'jpstudy.db',
-        setup: (db) {
-          db.run('PRAGMA foreign_keys = ON');
-        },
-      );
-    }
-
-    final dir = await getApplicationDocumentsDirectory();
-    final file = File(p.join(dir.path, 'jpstudy.db'));
-    return NativeDatabase(
-      file,
-      setup: (db) {
-        db.execute('PRAGMA foreign_keys = ON');
-      },
-    );
-  });
+  return LazyDatabase(openPlatformConnection);
 }

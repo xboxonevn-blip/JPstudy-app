@@ -13,7 +13,14 @@ class JPStudyApp extends StatelessWidget {
       title: 'JP Study',
       theme: AppTheme.light(),
       debugShowCheckedModeBanner: false,
-      home: const MainShell(),
+      initialRoute: _navItems.first.route,
+      onGenerateRoute: (settings) {
+        final index = _indexForRoute(settings.name);
+        return MaterialPageRoute(
+          settings: settings,
+          builder: (_) => MainShell(currentIndex: index),
+        );
+      },
     );
   }
 }
@@ -96,33 +103,38 @@ class AppTheme {
 
 class NavItem {
   final String label;
+  final String route;
   final Widget view;
 
-  const NavItem({required this.label, required this.view});
+  const NavItem({
+    required this.label,
+    required this.route,
+    required this.view,
+  });
 }
 
-class MainShell extends StatefulWidget {
-  const MainShell({super.key});
+const List<NavItem> _navItems = [
+  NavItem(label: 'A - Import', route: '/a', view: ImportView()),
+  NavItem(label: 'B - SRS', route: '/b', view: SrsView()),
+  NavItem(label: 'C - Cloze', route: '/c', view: ClozeView()),
+  NavItem(label: 'D - Test', route: '/d', view: TestView()),
+];
 
-  @override
-  State<MainShell> createState() => _MainShellState();
+int _indexForRoute(String? name) {
+  final index = _navItems.indexWhere((item) => item.route == name);
+  return index == -1 ? 0 : index;
 }
 
-class _MainShellState extends State<MainShell> {
-  int _index = 0;
+class MainShell extends StatelessWidget {
+  final int currentIndex;
 
-  late final List<NavItem> _items = [
-    const NavItem(label: 'Home', view: HomeView()),
-    const NavItem(label: 'A - Import', view: ImportView()),
-    const NavItem(label: 'B - SRS', view: SrsView()),
-    const NavItem(label: 'C - Cloze', view: ClozeView()),
-    const NavItem(label: 'D - Test', view: TestView()),
-  ];
+  const MainShell({super.key, required this.currentIndex});
 
-  void _setIndex(int value) {
-    setState(() {
-      _index = value;
-    });
+  void _handleTap(BuildContext context, int index) {
+    if (index == currentIndex) {
+      return;
+    }
+    Navigator.of(context).pushReplacementNamed(_navItems[index].route);
   }
 
   @override
@@ -133,15 +145,12 @@ class _MainShellState extends State<MainShell> {
           children: [
             NavBar(
               brand: 'JP Study',
-              currentIndex: _index,
-              items: _items,
-              onTap: _setIndex,
+              currentIndex: currentIndex,
+              items: _navItems,
+              onTap: (index) => _handleTap(context, index),
             ),
             Expanded(
-              child: IndexedStack(
-                index: _index,
-                children: _items.map((item) => item.view).toList(),
-              ),
+              child: _navItems[currentIndex].view,
             ),
           ],
         ),
@@ -314,59 +323,6 @@ class GradeButton extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       ),
       child: Text(label),
-    );
-  }
-}
-
-class HomeView extends StatelessWidget {
-  const HomeView({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final titleStyle = Theme.of(context).textTheme.titleLarge;
-    final subtitleStyle = Theme.of(context).textTheme.bodySmall;
-
-    return ListView(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      children: [
-        Text('Daily Plan - A/B/C/D', style: titleStyle),
-        const SizedBox(height: 8),
-        Text('Total items: 0 | Due today: 0', style: subtitleStyle),
-        Text('Activity: 0 | Acc: 0%', style: subtitleStyle),
-        Text('Streak: 0 days | Goal: 30/day', style: subtitleStyle),
-        SectionCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Quick actions', style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 12),
-              const Wrap(
-                spacing: 12,
-                runSpacing: 8,
-                children: [
-                  _ActionChip(label: 'Start SRS'),
-                  _ActionChip(label: 'Import CSV'),
-                  _ActionChip(label: 'Export attempts'),
-                ],
-              ),
-            ],
-          ),
-        ),
-        SectionCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('Tip', style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 6),
-              Text(
-                'After import, cards are scheduled for today.\n'
-                'Goal: SRS daily, then expand with Cloze/Test.',
-                style: subtitleStyle,
-              ),
-            ],
-          ),
-        ),
-      ],
     );
   }
 }
