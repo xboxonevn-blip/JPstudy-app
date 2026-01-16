@@ -17,3 +17,10 @@ If `flutter create` overwrites `lib/main.dart`, restore it from git.
 flutter pub get
 flutter run -d chrome
 ```
+
+## Drift (SQLite) codegen
+The database schema lives in `lib/data/database.dart`.
+Generate the Drift companion code with:
+```
+flutter pub run build_runner build --delete-conflicting-outputs
+```
