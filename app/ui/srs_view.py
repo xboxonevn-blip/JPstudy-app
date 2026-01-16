@@ -33,21 +33,21 @@ class SrsReviewView(QWidget):
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
 
-        title = QLabel("SRS Review (Thẻ đến hạn)")
-        title.setStyleSheet("font-size: 16px; font-weight: 700;")
+        title = QLabel("SRS Review (due today)")
+        title.setProperty("role", "title")
         layout.addWidget(title)
 
         top_row = QHBoxLayout()
         self.status = QLabel("")
-        self.status.setStyleSheet("color:#555;")
-        self.chk_leech = QCheckBox("Chỉ leech")
+        self.status.setProperty("role", "subtitle")
+        self.chk_leech = QCheckBox("Leech only")
         self.chk_leech.stateChanged.connect(self.refresh)
 
         self.cb_level = QComboBox()
-        self.cb_level.addItems(["Tất cả", "N5", "N4", "N3", "N2", "N1"])
+        self.cb_level.addItems(["All", "N5", "N4", "N3", "N2", "N1"])
         self.cb_level.currentIndexChanged.connect(self.refresh)
         self.ed_tag = QLineEdit()
-        self.ed_tag.setPlaceholderText("Lọc tag chứa...")
+        self.ed_tag.setPlaceholderText("Filter by tag...")
         self.ed_tag.returnPressed.connect(self.refresh)
 
         top_row.addWidget(self.status, 1)
@@ -58,16 +58,18 @@ class SrsReviewView(QWidget):
         layout.addLayout(top_row)
 
         self.card_frame = QFrame()
+        self.card_frame.setProperty("role", "card")
         self.card_frame.setFrameShape(QFrame.StyledPanel)
-        self.card_frame.setStyleSheet("QFrame{border:1px solid #ddd; border-radius:10px; padding:12px;}")
         c_layout = QVBoxLayout(self.card_frame)
 
         self.front = QLabel("")
+        self.front.setAlignment(Qt.AlignCenter)
         self.front.setWordWrap(True)
-        self.front.setStyleSheet("font-size: 18px; font-weight: 700;")
+        self.front.setStyleSheet("font-size: 20px; font-weight: 700;")
         c_layout.addWidget(self.front)
 
         self.back = QLabel("")
+        self.back.setAlignment(Qt.AlignCenter)
         self.back.setWordWrap(True)
         self.back.setStyleSheet("font-size: 14px; color:#333;")
         c_layout.addWidget(self.back)
@@ -75,12 +77,17 @@ class SrsReviewView(QWidget):
         layout.addWidget(self.card_frame, 1)
 
         btn_row = QHBoxLayout()
-        self.btn_reveal = QPushButton("Xem đáp án")
+        self.btn_reveal = QPushButton("Show Answer")
         self.btn_again = QPushButton("Again")
         self.btn_hard = QPushButton("Hard")
         self.btn_good = QPushButton("Good")
         self.btn_easy = QPushButton("Easy")
-        self.btn_back = QPushButton("Về Home")
+        self.btn_back = QPushButton("Back to Home")
+
+        self.btn_again.setProperty("role", "grade-again")
+        self.btn_hard.setProperty("role", "grade-hard")
+        self.btn_good.setProperty("role", "grade-good")
+        self.btn_easy.setProperty("role", "grade-easy")
 
         for b in [self.btn_reveal, self.btn_again, self.btn_hard, self.btn_good, self.btn_easy, self.btn_back]:
             b.setCursor(Qt.PointingHandCursor)
@@ -106,7 +113,7 @@ class SrsReviewView(QWidget):
 
     def _filters(self):
         level = self.cb_level.currentText()
-        level_filter = None if level == "Tất cả" else level
+        level_filter = None if level == "All" else level
         tag_filter = self.ed_tag.text().strip() or None
         return level_filter, tag_filter
 
@@ -130,8 +137,8 @@ class SrsReviewView(QWidget):
         self.back.setText("")
         if not self.queue:
             self.current = None
-            self.front.setText("Hết thẻ đến hạn hôm nay!")
-            self.status.setText("Bạn có thể quay lại Home hoặc nạp thêm dữ liệu.")
+            self.front.setText("All due cards are done for today!")
+            self.status.setText("You can go back home or import more data.")
             self.btn_reveal.setEnabled(False)
             for b in [self.btn_again, self.btn_hard, self.btn_good, self.btn_easy]:
                 b.setEnabled(False)
@@ -146,7 +153,7 @@ class SrsReviewView(QWidget):
         reading = self.current["reading"] or ""
         item_type = self.current["item_type"]
         self.front.setText(f"[{item_type}] {term}  {('(' + reading + ')') if reading else ''}".strip())
-        self.status.setText(f"Còn lại: {len(self.queue)+1} thẻ")
+        self.status.setText(f"Remaining: {len(self.queue)+1} cards")
 
     def on_reveal(self) -> None:
         if not self.current:
@@ -160,8 +167,8 @@ class SrsReviewView(QWidget):
         is_leech = int(self.current["is_leech"])
         meta = f"ease={ease:.2f} • lapses={lapses}" + (" • LEECH" if is_leech else "")
         text = (
-            f"Nghĩa: {meaning}\n\n"
-            f"Ví dụ: {example}\n\n"
+            f"Meaning: {meaning}\n\n"
+            f"Example: {example}\n\n"
             f"Tags: {tags}\n\n"
             f"{meta}"
         )
@@ -173,7 +180,7 @@ class SrsReviewView(QWidget):
         if not self.current:
             return
         if not self.revealed:
-            QMessageBox.information(self, "Gợi ý", "Hãy bấm 'Xem đáp án' trước khi chấm.")
+            QMessageBox.information(self, "Heads up", "Please tap 'Show Answer' before grading.")
             return
 
         state = SrsState(

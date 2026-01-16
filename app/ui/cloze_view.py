@@ -36,18 +36,18 @@ class ClozePracticeView(QWidget):
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
 
-        title = QLabel("C - Luyện Cloze (điền trống)")
-        title.setStyleSheet("font-size: 16px; font-weight: 700;")
+        title = QLabel("C - Cloze Practice")
+        title.setProperty("role", "title")
         layout.addWidget(title)
 
         top_row = QHBoxLayout()
         self.status = QLabel("")
-        self.status.setStyleSheet("color:#555;")
+        self.status.setProperty("role", "subtitle")
         self.cb_level = QComboBox()
-        self.cb_level.addItems(["Tất cả", "N5", "N4", "N3", "N2", "N1"])
+        self.cb_level.addItems(["All", "N5", "N4", "N3", "N2", "N1"])
         self.cb_level.currentIndexChanged.connect(self.refresh)
         self.ed_tag = QLineEdit()
-        self.ed_tag.setPlaceholderText("Lọc tag chứa...")
+        self.ed_tag.setPlaceholderText("Filter by tag...")
         self.ed_tag.returnPressed.connect(self.refresh)
         top_row.addWidget(self.status, 1)
         top_row.addWidget(QLabel("JLPT:"))
@@ -56,26 +56,29 @@ class ClozePracticeView(QWidget):
         layout.addLayout(top_row)
 
         self.card_frame = QFrame()
+        self.card_frame.setProperty("role", "card")
         self.card_frame.setFrameShape(QFrame.StyledPanel)
-        self.card_frame.setStyleSheet("QFrame{border:1px solid #ddd; border-radius:10px; padding:12px;}")
         c_layout = QVBoxLayout(self.card_frame)
         c_layout.setSpacing(8)
 
         self.lbl_cloze = QLabel("")
+        self.lbl_cloze.setAlignment(Qt.AlignCenter)
         self.lbl_cloze.setWordWrap(True)
         self.lbl_cloze.setStyleSheet("font-size: 18px; font-weight: 700;")
         c_layout.addWidget(self.lbl_cloze)
 
         self.lbl_hint = QLabel("")
+        self.lbl_hint.setAlignment(Qt.AlignCenter)
         self.lbl_hint.setWordWrap(True)
-        self.lbl_hint.setStyleSheet("color:#444;")
+        self.lbl_hint.setProperty("role", "subtitle")
         c_layout.addWidget(self.lbl_hint)
 
         self.ed_answer = QLineEdit()
-        self.ed_answer.setPlaceholderText("Điền đáp án vào chỗ trống (term)")
+        self.ed_answer.setPlaceholderText("Fill in the missing term")
         c_layout.addWidget(self.ed_answer)
 
         self.lbl_feedback = QLabel("")
+        self.lbl_feedback.setAlignment(Qt.AlignCenter)
         self.lbl_feedback.setWordWrap(True)
         self.lbl_feedback.setStyleSheet("color:#aa0000;")
         c_layout.addWidget(self.lbl_feedback)
@@ -84,9 +87,9 @@ class ClozePracticeView(QWidget):
 
         btn_row = QHBoxLayout()
         self.btn_check = QPushButton("Check")
-        self.btn_show = QPushButton("Xem đáp án")
-        self.btn_next = QPushButton("Tiếp")
-        self.btn_back = QPushButton("Về Home")
+        self.btn_show = QPushButton("Show Answer")
+        self.btn_next = QPushButton("Next")
+        self.btn_back = QPushButton("Back to Home")
         for b in [self.btn_check, self.btn_show, self.btn_next, self.btn_back]:
             b.setCursor(Qt.PointingHandCursor)
 
@@ -106,7 +109,7 @@ class ClozePracticeView(QWidget):
 
     def _filters(self):
         level = self.cb_level.currentText()
-        level_filter = None if level == "Tất cả" else level
+        level_filter = None if level == "All" else level
         tag_filter = self.ed_tag.text().strip() or None
         return level_filter, tag_filter
 
@@ -119,7 +122,7 @@ class ClozePracticeView(QWidget):
             level_filter=level_filter,
         )
         self.status.setText(
-            f"Queue: {len(self.queue)} câu (ưu tiên lỗi) | JLPT: {level_filter or 'all'} | tag: {tag_filter or 'all'}"
+            f"Queue: {len(self.queue)} (mistakes first) | JLPT: {level_filter or 'all'} | tag: {tag_filter or 'all'}"
         )
         self._next_card()
 
@@ -128,7 +131,7 @@ class ClozePracticeView(QWidget):
         self.ed_answer.setText("")
         if not self.queue:
             self.current = None
-            self.lbl_cloze.setText("Hết câu để luyện. Hãy thêm dữ liệu hoặc quay lại sau.")
+            self.lbl_cloze.setText("No sentences to practice. Add data or come back later.")
             self.lbl_hint.setText("")
             self.btn_check.setEnabled(False)
             self.btn_show.setEnabled(False)
@@ -146,10 +149,10 @@ class ClozePracticeView(QWidget):
         term = self.current.get("term") or ""
         fallback = self.current.get("cloze_fallback")
         reason = self.current.get("cloze_reason") or ""
-        warn = " ⚠ Cloze fallback" if fallback else ""
+        warn = " (cloze fallback)" if fallback else ""
         self.lbl_cloze.setText(cloze)
-        self.lbl_hint.setText(f"Gợi ý: {meaning}  ({term} {reading}){warn}".strip())
-        self.status.setText(f"Cần luyện: {len(self.queue)+1} câu | {reason}")
+        self.lbl_hint.setText(f"Hint: {meaning} ({term} {reading}){warn}".strip())
+        self.status.setText(f"Remaining: {len(self.queue)+1} | {reason}")
         self.ed_answer.setFocus()
 
     def on_show(self) -> None:
@@ -157,7 +160,7 @@ class ClozePracticeView(QWidget):
             return
         answer = self.current.get("answer") or self.current.get("term") or ""
         self.lbl_feedback.setStyleSheet("color:#006400;")
-        self.lbl_feedback.setText(f"Đáp án: {answer}")
+        self.lbl_feedback.setText(f"Answer: {answer}")
 
     def on_check(self) -> None:
         if not self.current:
@@ -203,8 +206,8 @@ class ClozePracticeView(QWidget):
 
         if is_correct:
             self.lbl_feedback.setStyleSheet("color:#006400;")
-            self.lbl_feedback.setText("Chuẩn! Chuyển câu tiếp theo.")
+            self.lbl_feedback.setText("Correct! Moving on.")
             self._next_card()
         else:
             self.lbl_feedback.setStyleSheet("color:#aa0000;")
-            self.lbl_feedback.setText(f"Sai rồi. Đáp án: {expected}")
+            self.lbl_feedback.setText(f"Incorrect. Answer: {expected}")

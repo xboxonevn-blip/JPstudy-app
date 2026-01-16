@@ -44,26 +44,26 @@ class MiniTestView(QWidget):
         layout = QVBoxLayout(self)
         layout.setSpacing(10)
 
-        title = QLabel("D - Mini Test (tùy biến)")
-        title.setStyleSheet("font-size: 16px; font-weight: 700;")
+        title = QLabel("D - Mini Test")
+        title.setProperty("role", "title")
         layout.addWidget(title)
 
         cfg_row = QHBoxLayout()
         self.sp_total = QSpinBox()
         self.sp_total.setRange(5, 30)
         self.sp_total.setValue(15)
-        self.cb_only_mistake = QCheckBox("Chỉ Mistake")
-        self.cb_only_due = QCheckBox("Chỉ Due")
+        self.cb_only_mistake = QCheckBox("Mistakes only")
+        self.cb_only_due = QCheckBox("Due only")
         self.cb_level = QComboBox()
-        self.cb_level.addItems(["Tất cả", "N5", "N4", "N3", "N2", "N1"])
+        self.cb_level.addItems(["All", "N5", "N4", "N3", "N2", "N1"])
         self.ed_tag = QLineEdit()
-        self.ed_tag.setPlaceholderText("Lọc tag chứa...")
-        self.btn_reload = QPushButton("Làm bài")
+        self.ed_tag.setPlaceholderText("Filter by tag...")
+        self.btn_reload = QPushButton("Build test")
         self.btn_reload.clicked.connect(self.start_new_test)
         for b in [self.cb_only_mistake, self.cb_only_due, self.btn_reload]:
             b.setCursor(Qt.PointingHandCursor)
 
-        cfg_row.addWidget(QLabel("Số câu:"))
+        cfg_row.addWidget(QLabel("Questions:"))
         cfg_row.addWidget(self.sp_total)
         cfg_row.addWidget(self.cb_only_mistake)
         cfg_row.addWidget(self.cb_only_due)
@@ -75,30 +75,33 @@ class MiniTestView(QWidget):
         layout.addLayout(cfg_row)
 
         self.status = QLabel("")
-        self.status.setStyleSheet("color:#555;")
+        self.status.setProperty("role", "subtitle")
         layout.addWidget(self.status)
 
         self.card_frame = QFrame()
+        self.card_frame.setProperty("role", "card")
         self.card_frame.setFrameShape(QFrame.StyledPanel)
-        self.card_frame.setStyleSheet("QFrame{border:1px solid #ddd; border-radius:10px; padding:12px;}")
         c_layout = QVBoxLayout(self.card_frame)
         c_layout.setSpacing(8)
 
         self.lbl_cloze = QLabel("")
+        self.lbl_cloze.setAlignment(Qt.AlignCenter)
         self.lbl_cloze.setWordWrap(True)
         self.lbl_cloze.setStyleSheet("font-size: 18px; font-weight: 700;")
         c_layout.addWidget(self.lbl_cloze)
 
         self.lbl_hint = QLabel("")
+        self.lbl_hint.setAlignment(Qt.AlignCenter)
         self.lbl_hint.setWordWrap(True)
-        self.lbl_hint.setStyleSheet("color:#444;")
+        self.lbl_hint.setProperty("role", "subtitle")
         c_layout.addWidget(self.lbl_hint)
 
         self.ed_answer = QLineEdit()
-        self.ed_answer.setPlaceholderText("Điền đáp án vào chỗ trống")
+        self.ed_answer.setPlaceholderText("Type your answer")
         c_layout.addWidget(self.ed_answer)
 
         self.lbl_feedback = QLabel("")
+        self.lbl_feedback.setAlignment(Qt.AlignCenter)
         self.lbl_feedback.setWordWrap(True)
         c_layout.addWidget(self.lbl_feedback)
 
@@ -106,10 +109,10 @@ class MiniTestView(QWidget):
 
         btn_row = QHBoxLayout()
         self.btn_check = QPushButton("Check")
-        self.btn_show = QPushButton("Xem đáp án")
-        self.btn_next = QPushButton("Tiếp")
-        self.btn_restart = QPushButton("Làm lại")
-        self.btn_back = QPushButton("Về Home")
+        self.btn_show = QPushButton("Show Answer")
+        self.btn_next = QPushButton("Next")
+        self.btn_restart = QPushButton("Restart")
+        self.btn_back = QPushButton("Back to Home")
         for b in [self.btn_check, self.btn_show, self.btn_next, self.btn_restart, self.btn_back]:
             b.setCursor(Qt.PointingHandCursor)
 
@@ -131,7 +134,7 @@ class MiniTestView(QWidget):
 
     def start_new_test(self) -> None:
         level = self.cb_level.currentText()
-        level_filter = None if level == "Tất cả" else level
+        level_filter = None if level == "All" else level
         tag_filter = self.ed_tag.text().strip() or None
         self.questions = get_test_batch(
             self.db,
@@ -153,14 +156,14 @@ class MiniTestView(QWidget):
         tag_filter = self.ed_tag.text().strip() or "all"
         mode = "mistake" if self.cb_only_mistake.isChecked() else ("due" if self.cb_only_due.isChecked() else "mix")
         self.status.setText(
-            f"Câu {self.index+1}/{total} | Đúng: {self.correct} | mode={mode} | JLPT={level} | tag={tag_filter}"
+            f"Q {self.index+1}/{total} | Correct: {self.correct} | mode={mode} | JLPT={level} | tag={tag_filter}"
         )
 
     def _next_question(self) -> None:
         self.lbl_feedback.setText("")
         self.ed_answer.setText("")
         if not self.questions:
-            self.lbl_cloze.setText("Chưa có câu nào. Hãy thêm dữ liệu hoặc import.")
+            self.lbl_cloze.setText("No questions. Please import more data.")
             self.lbl_hint.setText("")
             return
 
@@ -168,7 +171,7 @@ class MiniTestView(QWidget):
             total = len(self.questions)
             score = (self.correct / total) * 100 if total else 0.0
             self.lbl_cloze.setText(f"Done! Score: {self.correct}/{total} ({score:.1f}%)")
-            self.lbl_hint.setText("Sai sẽ được ghi vào sổ lỗi và xuất hiện lại ở B/C.")
+            self.lbl_hint.setText("Mistakes are logged and will resurface in SRS/Cloze.")
             self.btn_check.setEnabled(False)
             self.btn_show.setEnabled(False)
             self.btn_next.setEnabled(False)
@@ -186,7 +189,7 @@ class MiniTestView(QWidget):
         term = q.get("term") or ""
         reading = q.get("reading") or ""
         source = q.get("question_source") or ""
-        self.lbl_hint.setText(f"Gợi ý: {meaning} ({term} {reading}) | nguồn: {source}")
+        self.lbl_hint.setText(f"Hint: {meaning} ({term} {reading}) | source: {source}")
         self._update_status()
         self.ed_answer.setFocus()
 
@@ -195,7 +198,7 @@ class MiniTestView(QWidget):
             return
         expected = self.questions[self.index].get("answer") or self.questions[self.index].get("term") or ""
         self.lbl_feedback.setStyleSheet("color:#006400;")
-        self.lbl_feedback.setText(f"Đáp án: {expected}")
+        self.lbl_feedback.setText(f"Answer: {expected}")
 
     def on_check(self) -> None:
         if self.index >= len(self.questions):
@@ -246,11 +249,11 @@ class MiniTestView(QWidget):
         if is_correct:
             self.correct += 1
             self.lbl_feedback.setStyleSheet("color:#006400;")
-            self.lbl_feedback.setText("Chuẩn! Tiếp tục.")
+            self.lbl_feedback.setText("Correct! Keep going.")
             self.index += 1
             self._next_question()
         else:
             self.lbl_feedback.setStyleSheet("color:#aa0000;")
-            self.lbl_feedback.setText(f"Sai rồi. Đáp án: {expected}")
+            self.lbl_feedback.setText(f"Incorrect. Answer: {expected}")
             self.index += 1
             self._update_status()
