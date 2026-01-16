@@ -340,10 +340,10 @@ class HomeView extends StatelessWidget {
             children: [
               Text('Quick actions', style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 12),
-              Wrap(
+              const Wrap(
                 spacing: 12,
                 runSpacing: 8,
-                children: const [
+                children: [
                   _ActionChip(label: 'Start SRS'),
                   _ActionChip(label: 'Import CSV'),
                   _ActionChip(label: 'Export attempts'),
@@ -391,10 +391,10 @@ class ImportView extends StatelessWidget {
             children: [
               Text('Actions', style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 12),
-              Wrap(
+              const Wrap(
                 spacing: 12,
                 runSpacing: 8,
-                children: const [
+                children: [
                   _ActionChip(label: 'Import CSV'),
                   _ActionChip(label: 'Auto Import'),
                   _ActionChip(label: 'Add item'),
@@ -439,11 +439,11 @@ class SrsView extends StatelessWidget {
               const SizedBox(height: 12),
               Text('Back: meaning / example / tags', style: subtitleStyle),
               const SizedBox(height: 16),
-              Wrap(
+              const Wrap(
                 spacing: 10,
                 runSpacing: 8,
                 alignment: WrapAlignment.center,
-                children: const [
+                children: [
                   GradeButton(label: 'Again', color: AppColors.gradeAgain, textColor: Colors.white),
                   GradeButton(label: 'Hard', color: AppColors.gradeHard, textColor: Colors.black87),
                   GradeButton(label: 'Good', color: AppColors.gradeGood, textColor: Colors.white),
@@ -480,13 +480,13 @@ class ClozeView extends StatelessWidget {
               const SizedBox(height: 12),
               Text('Hint: meaning (term reading)', style: subtitleStyle),
               const SizedBox(height: 12),
-              TextField(
-                decoration: const InputDecoration(labelText: 'Your answer'),
+              const TextField(
+                decoration: InputDecoration(labelText: 'Your answer'),
               ),
               const SizedBox(height: 12),
-              Wrap(
+              const Wrap(
                 spacing: 12,
-                children: const [
+                children: [
                   _ActionChip(label: 'Check'),
                   _ActionChip(label: 'Show answer'),
                   _ActionChip(label: 'Next'),
@@ -522,13 +522,13 @@ class TestView extends StatelessWidget {
               const SizedBox(height: 8),
               Text('Sentence with ____', style: subtitleStyle),
               const SizedBox(height: 12),
-              TextField(
-                decoration: const InputDecoration(labelText: 'Your answer'),
+              const TextField(
+                decoration: InputDecoration(labelText: 'Your answer'),
               ),
               const SizedBox(height: 12),
-              Wrap(
+              const Wrap(
                 spacing: 12,
-                children: const [
+                children: [
                   _ActionChip(label: 'Check'),
                   _ActionChip(label: 'Show answer'),
                   _ActionChip(label: 'Next'),
